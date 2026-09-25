@@ -12,6 +12,7 @@ import type { FixedAsset, Lang } from '../../types/fixedAsset'
 import { formatMoney } from '../../utils/fixedAsset'
 import { SectionCard } from '../common/SectionCard'
 import { EmptyState } from '../common/States'
+import { glassButton, glassIconButton, glassInset, glassRadius } from '../../theme/liquidGlass'
 
 const PAGE_SIZES = [25, 50, 100]
 const DEFAULT_PAGE_SIZE = 50
@@ -108,9 +109,9 @@ function AssetTableImpl({ rows, lang }: { rows: FixedAsset[]; lang: Lang }) {
           </Typography>
           <Button
             size="small"
-            variant="outlined"
             color="inherit"
             startIcon={<ViewColumnOutlined />}
+            sx={glassButton}
             onClick={(e) => setMenuAnchor(e.currentTarget)}
             aria-haspopup="menu"
             aria-expanded={Boolean(menuAnchor)}
@@ -136,7 +137,7 @@ function AssetTableImpl({ rows, lang }: { rows: FixedAsset[]; lang: Lang }) {
         <EmptyState icon={<SearchOffOutlined />} title={vi ? 'Không có tài sản' : 'No assets'} description={vi ? 'Không có tài sản phù hợp với bộ lọc hiện tại.' : 'No assets match the current filters.'} />
       ) : (
         <>
-          <TableContainer ref={scrollRef} sx={{ maxHeight: 'max(440px, calc(100vh - 220px))' }}>
+          <TableContainer ref={scrollRef} sx={{ maxHeight: 'max(440px, calc(100vh - 250px))' }}>
             {/* Cell styling lives on the table (one style rule) instead of per-cell sx (one per cell). */}
             <Table stickyHeader size="small" sx={tableSx}>
               <TableHead>
@@ -177,7 +178,14 @@ function AssetTableImpl({ rows, lang }: { rows: FixedAsset[]; lang: Lang }) {
             })[type]}
             showFirstButton
             showLastButton
-            sx={{ borderTop: 1, borderColor: 'divider', flexShrink: 0 }}
+            sx={(theme) => ({
+              borderTop: 1,
+              borderColor: 'divider',
+              flexShrink: 0,
+              '& .MuiTablePagination-actions': { display: 'flex', gap: 0.5 },
+              '& .MuiTablePagination-actions .MuiIconButton-root': glassIconButton(theme, 30),
+              '& .MuiTablePagination-select': { ...glassInset(theme, glassRadius.control), py: 0.5 },
+            })}
           />
         </>
       )}

@@ -1,4 +1,5 @@
 import { alpha, createTheme, type PaletteMode, type Theme } from '@mui/material'
+import { glassPopover } from './liquidGlass'
 import { tokens } from './palette'
 
 const fontFamily = '"Segoe UI", "Inter", Roboto, "Helvetica Neue", Arial, sans-serif'
@@ -43,6 +44,15 @@ export function createAppTheme(mode: PaletteMode): Theme {
         styleOverrides: {
           body: { backgroundColor: t.background },
           '*:focus-visible': { outline: `2px solid ${t.primary}`, outlineOffset: 2 },
+          // Keep only essential state changes when the user asks for less motion.
+          '@media (prefers-reduced-motion: reduce)': {
+            '*, *::before, *::after': {
+              transitionDuration: '0.01ms !important',
+              animationDuration: '0.01ms !important',
+              animationIterationCount: '1 !important',
+              scrollBehavior: 'auto !important',
+            },
+          },
         },
       },
       MuiPaper: {
@@ -54,7 +64,7 @@ export function createAppTheme(mode: PaletteMode): Theme {
       },
       MuiCard: {
         defaultProps: { variant: 'outlined' },
-        styleOverrides: { root: { borderColor: t.border, boxShadow: t.shadow } },
+        styleOverrides: { root: { borderColor: t.border, boxShadow: t.shadow, borderRadius: 12, backgroundColor: t.paper } },
       },
       MuiButton: {
         defaultProps: { disableElevation: true },
@@ -88,10 +98,11 @@ export function createAppTheme(mode: PaletteMode): Theme {
         },
       },
       MuiTextField: { defaultProps: { size: 'small' } },
-      MuiAutocomplete: { defaultProps: { size: 'small' } },
+      MuiAutocomplete: { defaultProps: { size: 'small' }, styleOverrides: { paper: ({ theme }) => glassPopover(theme) } },
+      MuiMenu: { styleOverrides: { paper: ({ theme }) => glassPopover(theme) } },
       MuiChip: {
         styleOverrides: {
-          root: { borderRadius: 6, fontWeight: 600 },
+          root: { borderRadius: 999, fontWeight: 600 },
           sizeSmall: { height: 22, fontSize: '0.75rem' },
         },
       },

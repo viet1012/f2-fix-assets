@@ -19,7 +19,7 @@ import type { AppTab } from './types/fixedAsset'
 import { issueKinds } from './utils/fixedAsset'
 import { density } from './theme/density'
 
-// Map and Guide embed large base64 layout/guide images (legacyData.ts); load them on demand.
+// Map (layout images in src/assets/maps) and Guide (base64 guide images in legacyData.ts) load on demand.
 const MapTab = lazy(() => import('./components/map/MapTab'))
 const GuideTab = lazy(() => import('./components/guide/GuideTab'))
 

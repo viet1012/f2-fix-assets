@@ -1,12 +1,12 @@
-import { Autocomplete, Box, Button, Card, Chip, IconButton, InputAdornment, Stack, TextField, Typography } from '@mui/material'
+import { Autocomplete, Box, Button, Chip, IconButton, InputAdornment, Stack, TextField, Typography } from '@mui/material'
 import ClearRounded from '@mui/icons-material/ClearRounded'
 import FilterAltOffOutlined from '@mui/icons-material/FilterAltOffOutlined'
 import SearchRounded from '@mui/icons-material/SearchRounded'
 import TuneRounded from '@mui/icons-material/TuneRounded'
 import { memo, useMemo } from 'react'
 import type { DashboardFilters, FixedAsset, Lang } from '../../types/fixedAsset'
-import { density } from '../../theme/density'
 import { filterAssets, uniq } from '../../utils/fixedAsset'
+import { glassFilterControls, glassFilterReset, glassFilterSearch } from '../../theme/liquidGlass'
 
 interface Props {
   lang: Lang
@@ -47,26 +47,28 @@ function FilterBarImpl({ lang, rows, filteredCount, value, onChange, onReset }: 
   const hasAny = active.length > 0 || value.text !== ''
 
   return (
-    <Card component="section" aria-label={vi ? 'Bộ lọc' : 'Filters'} sx={{ p: density.pad }}>
+    // No card: the glass fields float directly on the page background (glass on an opaque white box reads as plain white).
+    <Box component="section" aria-label={vi ? 'Bộ lọc' : 'Filters'}>
       {/*
         One grid for search + filters + result/reset:
         lg+ (6 cols): [search ×2][f1][f2][f3][f4] / [f5][f6][f7][f8][count · reset ×2]
         sm (4 cols) and xs (2 cols) wrap the same sequence into more rows.
       */}
       <Box
-        sx={{
+        sx={(theme) => ({
+          ...glassFilterControls(theme),
           display: 'grid',
-          gap: 1.25,
+          gap: '10px',
           alignItems: 'center',
           gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'repeat(4, minmax(0, 1fr))', lg: 'repeat(6, minmax(0, 1fr))' },
-        }}
+        })}
       >
         <TextField
           fullWidth
           value={value.text}
           onChange={(e) => onChange({ ...value, text: e.target.value })}
           placeholder={vi ? 'Tên / Mã máy / Maker / Vị trí...' : 'Name / Code / Maker / Position...'}
-          sx={{ gridColumn: { xs: '1 / -1', sm: 'span 2' } }}
+          sx={(theme) => ({ ...glassFilterSearch(theme), gridColumn: { xs: '1 / -1', sm: 'span 2' } })}
           slotProps={{
             htmlInput: { 'aria-label': vi ? 'Tìm kiếm' : 'Search' },
             input: {
@@ -97,7 +99,7 @@ function FilterBarImpl({ lang, rows, filteredCount, value, onChange, onReset }: 
           <Typography variant="body2" color="text.secondary" noWrap aria-live="polite">
             <Box component="strong" sx={{ color: 'text.primary' }}>{filteredCount.toLocaleString()}</Box> / {rows.length.toLocaleString()} {vi ? 'tài sản' : 'assets'}
           </Typography>
-          <Button variant="outlined" size="small" color="inherit" startIcon={<FilterAltOffOutlined />} disabled={!hasAny} onClick={onReset} sx={{ flexShrink: 0 }}>
+          <Button size="small" color="inherit" startIcon={<FilterAltOffOutlined />} disabled={!hasAny} onClick={onReset} sx={(theme) => ({ ...glassFilterReset(theme), flexShrink: 0 })}>
             {vi ? 'Xóa bộ lọc' : 'Reset filters'}
           </Button>
         </Stack>
@@ -125,7 +127,7 @@ function FilterBarImpl({ lang, rows, filteredCount, value, onChange, onReset }: 
           ))}
         </Stack>
       )}
-    </Card>
+    </Box>
   )
 }
 

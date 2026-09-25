@@ -16,6 +16,7 @@ import { SectionCard } from '../common/SectionCard'
 import { StatCard } from '../common/StatCard'
 import { EmptyState } from '../common/States'
 import { density } from '../../theme/density'
+import { glassFilterControls, glassFilterSearch } from '../../theme/liquidGlass'
 
 const ROW_LIMIT = 300
 
@@ -88,7 +89,7 @@ export function IssuesTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang }) {
           title={vi ? 'Danh sách cần xử lý' : 'Assets to resolve'}
           actions={<Typography variant="caption" color="text.secondary">{Math.min(filtered.length, ROW_LIMIT)} / {filtered.length}</Typography>}
         >
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ p: 1.5, alignItems: { md: 'center' }, borderBottom: 1, borderColor: 'divider' }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={(theme) => ({ ...glassFilterControls(theme), p: 1.5, alignItems: { md: 'center' }, borderBottom: 1, borderColor: 'divider' })}>
             <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
               <FormControlLabel control={<Switch size="small" color="warning" checked={notYet} onChange={(e) => setNotYet(e.target.checked)} />} label={<Typography variant="body2">Not yet</Typography>} />
               <FormControlLabel control={<Switch size="small" color="error" checked={noPhoto} onChange={(e) => setNoPhoto(e.target.checked)} />} label={<Typography variant="body2">{vi ? 'Chưa có ảnh/label' : 'No photo/label'}</Typography>} />
@@ -98,6 +99,7 @@ export function IssuesTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={vi ? 'Tìm mã / tên tài sản...' : 'Search code / asset name...'}
+              sx={glassFilterSearch}
               slotProps={{ htmlInput: { 'aria-label': vi ? 'Tìm mã / tên tài sản' : 'Search code / asset name' }, input: { startAdornment: <InputAdornment position="start"><SearchRounded fontSize="small" /></InputAdornment> } }}
             />
             <Autocomplete

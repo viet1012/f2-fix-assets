@@ -8,5 +8,5 @@ export const density = {
   /** Inner padding of standard cards / panels. */
   pad: 1.5,
   /** Space between the tab bar and tab content. */
-  tabGap: 1.5,
+  tabGap: 1.25,
 } as const

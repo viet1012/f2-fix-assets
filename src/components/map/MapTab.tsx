@@ -6,6 +6,7 @@ import { uniq } from '../../utils/fixedAsset'
 import { FloorMap, type MapZone } from './FloorMap'
 import { ZoneDetailPanel } from './ZoneDetailPanel'
 import { density } from '../../theme/density'
+import { glassFilterControls, glassFloating, glassRadius, glassTabs } from '../../theme/liquidGlass'
 
 // The layout images only cover Factory 2 / KVH division.
 const MAP_FACTORY = 'Factory 2'
@@ -61,9 +62,11 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
 
   return (
     <Stack spacing={density.gap}>
-      <Card>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 1 }}>
+      {/* Floating glass control layer (no opaque card behind it). */}
+      <Stack spacing={1}>
+        <Box sx={{ display: 'flex' }}>
           <Tabs
+            sx={(theme) => ({ ...glassTabs(theme), maxWidth: '100%', width: 'fit-content' })}
             value={floorIndex}
             onChange={(_, i: number) => { setFloorIndex(i); setZone('') }}
             variant="scrollable"
@@ -73,14 +76,14 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
             {FLOORS.map((f, i) => <Tab key={f.id} value={i} label={f.title} />)}
           </Tabs>
         </Box>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} useFlexGap sx={{ px: density.pad, py: 1.25, alignItems: { md: 'center' }, flexWrap: { md: 'wrap' } }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} useFlexGap sx={{ alignItems: { md: 'center' }, flexWrap: { md: 'wrap' } }}>
           <Autocomplete
             options={pics}
             value={pic || null}
             onChange={(_, next) => { setPic(next ?? ''); setZone('') }}
             isOptionEqualToValue={(opt, val) => opt === val}
             autoHighlight
-            sx={{ width: { xs: '100%', md: 280 } }}
+            sx={(theme) => ({ ...glassFilterControls(theme), width: { xs: '100%', md: 280 } })}
             noOptionsText={vi ? 'Không có giá trị' : 'No options'}
             renderInput={(params) => <TextField {...params} label="PIC Checked" placeholder={vi ? 'Tất cả PIC' : 'All PIC'} />}
           />
@@ -92,13 +95,13 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
             {vi ? 'Sơ đồ layout chỉ áp dụng cho Factory 2 (KVH).' : 'Layout map applies to Factory 2 (KVH) only.'}
           </Alert>
           <Box sx={{ flex: 1, display: { xs: 'none', md: 'block' } }} />
-          <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }} aria-label={vi ? 'Chú giải' : 'Legend'}>
+          <Stack direction="row" spacing={2} useFlexGap sx={(theme) => ({ ...glassFloating(theme, glassRadius.capsule), position: 'relative', flexWrap: 'wrap', px: 1.5, py: 0.75 })} aria-label={vi ? 'Chú giải' : 'Legend'}>
             <LegendDot color="#2563eb" label={vi ? 'Có tài sản (số lượng)' : 'Has assets (count)'} />
             <LegendDot color="#64748b" label={vi ? 'Không có tài sản' : 'No assets'} />
             <LegendDot color="error.main" label={vi ? 'Đang chọn' : 'Selected'} ring />
           </Stack>
         </Stack>
-      </Card>
+      </Stack>
 
       <Box sx={{ display: 'grid', gap: density.gap, gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 1fr) 320px' } }}>
         <Card sx={{ minHeight: 480, height: { lg: 640 } }}>

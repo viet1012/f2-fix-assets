@@ -4,6 +4,7 @@ import FitScreenOutlined from '@mui/icons-material/FitScreenOutlined'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import { useState } from 'react'
 import type { Lang } from '../../types/fixedAsset'
+import { glassFloating, glassLens, glassRadius, px } from '../../theme/liquidGlass'
 
 export interface MapZone {
   code: string
@@ -38,7 +39,16 @@ export function FloorMap({ lang, title, imageData, imgW, imgH, zones, selectedZo
       {/* Zoom controls */}
       <Stack
         direction="row"
-        sx={{ position: 'absolute', top: 12, right: 12, zIndex: 3, bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 1.5, boxShadow: 1 }}
+        sx={(theme) => ({
+          ...glassFloating(theme, glassRadius.capsule),
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          zIndex: 3,
+          p: '2px',
+          alignItems: 'center',
+          '& .MuiIconButton-root': { borderRadius: px(glassRadius.capsule), '&:hover': glassLens(theme) },
+        })}
       >
         <Tooltip title={vi ? 'Thu nhỏ' : 'Zoom out'}>
           <span>

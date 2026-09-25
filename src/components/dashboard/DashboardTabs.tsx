@@ -7,6 +7,7 @@ import ReportProblemOutlined from '@mui/icons-material/ReportProblemOutlined'
 import TableRowsOutlined from '@mui/icons-material/TableRowsOutlined'
 import type { ReactElement } from 'react'
 import type { AppTab, Lang } from '../../types/fixedAsset'
+import { glassRadius, glassTabs, HEADER_HEIGHT } from '../../theme/liquidGlass'
 
 export const tabs: Array<{ key: AppTab; vi: string; en: string; icon: ReactElement }> = [
   { key: 'overview', vi: 'Tổng quan', en: 'Overview', icon: <DashboardOutlined fontSize="small" /> },
@@ -30,8 +31,10 @@ interface Props {
 export function DashboardTabs({ lang, value, onChange, issueCount }: Props) {
   const vi = lang === 'vi'
   return (
-    <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+    // Sticky floating glass bar directly under the header; content scrolls beneath it.
+    <Box sx={{ position: 'sticky', top: HEADER_HEIGHT + 6, zIndex: (t) => t.zIndex.appBar - 1, display: 'flex', alignItems: 'flex-start' }}>
       <Tabs
+        sx={(theme) => ({ ...glassTabs(theme), maxWidth: '100%', width: 'fit-content' })}
         value={value}
         onChange={(_, next: AppTab) => onChange(next)}
         variant="scrollable"
@@ -51,7 +54,7 @@ export function DashboardTabs({ lang, value, onChange, issueCount }: Props) {
               <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
                 {vi ? item.vi : item.en}
                 {item.key === 'issues' && issueCount > 0 && (
-                  <Chip size="small" color="warning" label={issueCount.toLocaleString()} sx={{ height: 18, fontSize: '0.6875rem', '& .MuiChip-label': { px: 0.75 } }} />
+                  <Chip size="small" color="warning" label={issueCount.toLocaleString()} sx={{ height: 18, fontSize: '0.6875rem', borderRadius: `${glassRadius.capsule}px`, '& .MuiChip-label': { px: 0.75 } }} />
                 )}
               </Box>
             }

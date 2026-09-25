@@ -8,6 +8,7 @@ import { useRef, useState, type DragEvent } from 'react'
 import type { DataStatus } from '../../hooks/useFixedAssets'
 import { density } from '../../theme/density'
 import type { Lang, LastImport } from '../../types/fixedAsset'
+import { glassButton, glassTinted } from '../../theme/liquidGlass'
 
 const ACCEPT = '.xlsx,.xls,.xlsm'
 const ACCEPTED_EXT = ACCEPT.split(',')
@@ -98,7 +99,7 @@ export function UploadBar({ lang, status, lastImport, rowCount, busy, onUpload, 
         sx={{
           display: 'grid',
           gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(2, minmax(0, 1fr))', lg: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr)' },
-          '& > section': { minWidth: 0, px: density.pad, py: 1.25, borderColor: 'divider' },
+          '& > section': { minWidth: 0, px: density.pad, py: 1, borderColor: 'divider' },
         }}
       >
         {/* Excel upload */}
@@ -113,8 +114,8 @@ export function UploadBar({ lang, status, lastImport, rowCount, busy, onUpload, 
               alignItems: 'center',
               gap: 1.25,
               flexWrap: 'wrap',
-              px: 1,
-              py: 0.75,
+              px: 0.75,
+              py: 0.5,
               border: '1px dashed',
               borderColor: dragOver ? 'primary.main' : 'divider',
               borderRadius: 1.5,
@@ -135,12 +136,11 @@ export function UploadBar({ lang, status, lastImport, rowCount, busy, onUpload, 
               }}
             />
             <Button
-              variant="contained"
               size="small"
               startIcon={busy && status.type === 'processing' && status.operation === 'upload' ? <CircularProgress size={14} color="inherit" /> : <CloudUploadOutlined />}
               disabled={disabled}
               onClick={() => inputRef.current?.click()}
-              sx={{ flexShrink: 0 }}
+              sx={(theme) => ({ ...glassTinted(theme), flexShrink: 0 })}
             >
               {vi ? 'Chọn file Excel' : 'Choose Excel file'}
             </Button>
@@ -153,11 +153,9 @@ export function UploadBar({ lang, status, lastImport, rowCount, busy, onUpload, 
               ) : (
                 <Typography variant="body2" color="text.secondary" noWrap>
                   {vi ? 'hoặc kéo thả file vào đây' : 'or drag & drop a file here'}
+                  <Box component="span" sx={{ color: 'text.disabled', typography: 'caption' }}> · .xlsx, .xls, .xlsm</Box>
                 </Typography>
               )}
-              <Typography variant="caption" color="text.secondary" component="div" noWrap sx={{ lineHeight: 1.35 }}>
-                {vi ? 'Định dạng' : 'Accepted'}: .xlsx, .xls, .xlsm
-              </Typography>
             </Box>
           </Box>
         </Box>
@@ -177,11 +175,11 @@ export function UploadBar({ lang, status, lastImport, rowCount, busy, onUpload, 
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><LinkRounded fontSize="small" /></InputAdornment> } }}
             />
             <Button
-              variant="outlined"
+              color="inherit"
               disabled={disabled || !url.trim()}
               onClick={submitUrl}
               startIcon={busy && status.type === 'processing' && status.operation === 'url' ? <CircularProgress size={14} color="inherit" /> : undefined}
-              sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+              sx={(theme) => ({ ...glassButton(theme), flexShrink: 0, whiteSpace: 'nowrap' })}
             >
               {vi ? 'Tải dữ liệu' : 'Load'}
             </Button>
@@ -205,4 +203,4 @@ export function UploadBar({ lang, status, lastImport, rowCount, busy, onUpload, 
   )
 }
 
-const sectionLabelSx = { display: 'block', lineHeight: 1.5, mb: 0.5 } as const
+const sectionLabelSx = { display: 'block', lineHeight: 1.4, mb: 0.5 } as const

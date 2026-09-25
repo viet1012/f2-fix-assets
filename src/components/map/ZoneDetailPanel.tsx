@@ -2,6 +2,7 @@ import { Box, Chip, Divider, IconButton, List, ListItem, ListItemButton, ListIte
 import CloseRounded from '@mui/icons-material/CloseRounded'
 import TouchAppOutlined from '@mui/icons-material/TouchAppOutlined'
 import type { FixedAsset, Lang } from '../../types/fixedAsset'
+import { glassIconButton } from '../../theme/liquidGlass'
 import { formatMoney } from '../../utils/fixedAsset'
 import { EmptyState } from '../common/States'
 import type { MapZone } from './FloorMap'
@@ -55,7 +56,7 @@ export function ZoneDetailPanel({ lang, zone, rows, zones, onSelectZone }: Props
           <Typography variant="h2" component="h3">{zone}</Typography>
         </Box>
         <Tooltip title={vi ? 'Bỏ chọn khu vực' : 'Clear selection'}>
-          <IconButton size="small" aria-label={vi ? 'Bỏ chọn khu vực' : 'Clear selection'} onClick={() => onSelectZone('')}>
+          <IconButton size="small" aria-label={vi ? 'Bỏ chọn khu vực' : 'Clear selection'} onClick={() => onSelectZone('')} sx={(theme) => glassIconButton(theme, 30)}>
             <CloseRounded fontSize="small" />
           </IconButton>
         </Tooltip>
