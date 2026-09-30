@@ -1,31 +1,13 @@
 import { Alert, Autocomplete, Box, Card, Stack, Tab, Tabs, TextField, Typography } from '@mui/material'
 import { useMemo, useState } from 'react'
-import { FLOORS } from '../../data/mapData'
+import { FLOORS, MAP_DIV, MAP_FACTORY, ZONE_INDEX } from '../../data/mapData'
 import type { FixedAsset, Lang } from '../../types/fixedAsset'
 import { uniq } from '../../utils/fixedAsset'
+import { matchesZoneNormalized, normalize, rowsForLayout } from '../../utils/zone'
 import { FloorMap, type MapZone } from './FloorMap'
 import { ZoneDetailPanel } from './ZoneDetailPanel'
 import { density } from '../../theme/density'
 import { glassFilterControls, glassFloating, glassRadius, glassTabs } from '../../theme/liquidGlass'
-
-// The layout images only cover Factory 2 / KVH division.
-const MAP_FACTORY = 'Factory 2'
-const MAP_DIV = 'KVH'
-
-function normalize(value?: string | null) {
-  return (value ?? '').trim().toLowerCase()
-}
-function posTokens(position?: string | null) {
-  return (position ?? '').trim().split(/\s+/).filter(Boolean)
-}
-function matchesZone(row: FixedAsset, code: string) {
-  return posTokens(row.position).some((token) => token === code || token.startsWith(`${code}-`))
-}
-/** DB floor value for a layout, taken from its title ("Floor 1 - Press" -> "1F"). */
-function layoutDbFloor(title: string): string | null {
-  const m = /^Floor\s+(\d+)\b/i.exec(title)
-  return m ? `${m[1]}F` : null
-}
 
 function LegendDot({ color, label, ring = false }: { color: string; label: string; ring?: boolean }) {
   return (
@@ -47,16 +29,16 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
   )
   const pics = useMemo(() => uniq(base.map((r) => r.pic)), [base])
   const floor = FLOORS[floorIndex]
-  const dbFloor = layoutDbFloor(floor.title)
-  const visible = useMemo(() => {
-    let result = base
-    if (dbFloor) result = result.filter((r) => normalize(r.floor) === normalize(dbFloor))
-    if (pic) result = result.filter((r) => r.pic === pic)
-    return result
-  }, [base, dbFloor, pic])
-  const selectedRows = useMemo(() => (zone ? visible.filter((r) => matchesZone(r, zone)) : []), [visible, zone])
+  // Place assets by zone (ZONE_INDEX), not by `floor`, so rows whose floor disagrees with the drawing still show up.
+  const { visible, mismatched } = useMemo(() => {
+    const scoped = rowsForLayout(base, floor, ZONE_INDEX)
+    return pic
+      ? { visible: scoped.rows.filter((r) => r.pic === pic), mismatched: scoped.mismatched.filter((r) => r.pic === pic) }
+      : { visible: scoped.rows, mismatched: scoped.mismatched }
+  }, [base, floor, pic])
+  const selectedRows = useMemo(() => (zone ? visible.filter((r) => matchesZoneNormalized(r, zone)) : []), [visible, zone])
   const zones: MapZone[] = useMemo(
-    () => floor.zones.map((z) => ({ code: z.code, x: z.x, y: z.y, count: visible.filter((r) => matchesZone(r, z.code)).length })),
+    () => floor.zones.map((z) => ({ code: z.code, x: z.x, y: z.y, count: visible.filter((r) => matchesZoneNormalized(r, z.code)).length })),
     [floor, visible],
   )
 
@@ -94,6 +76,13 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
           <Alert severity="warning" variant="standard" sx={{ py: 0, px: 1.25, '& .MuiAlert-icon': { mr: 1 } }}>
             {vi ? 'Sơ đồ layout chỉ áp dụng cho Factory 2 (KVH).' : 'Layout map applies to Factory 2 (KVH) only.'}
           </Alert>
+          {mismatched.length > 0 && (
+            <Alert severity="info" variant="standard" sx={{ py: 0, px: 1.25, '& .MuiAlert-icon': { mr: 1 } }}>
+              {vi
+                ? `${mismatched.length} tài sản có tầng (Floor) lệch với zone, hiển thị theo zone.`
+                : `${mismatched.length} asset(s) have a floor that disagrees with their zone; shown by zone.`}
+            </Alert>
+          )}
           <Box sx={{ flex: 1, display: { xs: 'none', md: 'block' } }} />
           <Stack direction="row" spacing={2} useFlexGap sx={(theme) => ({ ...glassFloating(theme, glassRadius.capsule), position: 'relative', flexWrap: 'wrap', px: 1.5, py: 0.75 })} aria-label={vi ? 'Chú giải' : 'Legend'}>
             <LegendDot color="#2563eb" label={vi ? 'Có tài sản (số lượng)' : 'Has assets (count)'} />

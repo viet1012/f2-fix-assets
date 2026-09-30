@@ -5,122 +5,24 @@ import floor1Warehouse from '../assets/maps/floor1-warehouse.png'
 import floor1Mold from '../assets/maps/floor1-mold.png'
 import floor2All from '../assets/maps/floor2-all.png'
 
-/**
- * Visual boundary of a map area (separate from `zones`, which are the count-marker positions).
- * Points are percentages (0-100) of the layout image box: the same coordinate space as zone x/y.
- */
-export interface MapArea {
-  code: string
-  points: Array<{ x: number; y: number }>
-}
+import {
+  FLOOR1_GUIDE_AREAS,
+  FLOOR1_MOLD_AREAS,
+  FLOOR1_PRESS_AREAS,
+  FLOOR1_WAREHOUSE_AREAS,
+  FLOOR2_ALL_AREAS,
+} from './mapAreas'
+import { SUB_AREAS } from './subAreas'
+import { buildZoneIndex } from '../utils/zone'
 
-/** Axis-aligned area as a 4-point polygon (clockwise from top-left), in image percentages. */
-function rectArea(code: string, left: number, top: number, right: number, bottom: number): MapArea {
-  return {
-    code,
-    points: [
-      { x: left, y: top },
-      { x: right, y: top },
-      { x: right, y: bottom },
-      { x: left, y: bottom },
-    ],
-  }
-}
+export type { MapArea } from './mapAreas'
 
-/** Floor 1 - Press major areas. Approximate starting boundaries; adjust against the image as needed. */
-const FLOOR1_PRESS_AREAS: MapArea[] = [
-  rectArea('A1', 27.37, 30.97, 46.30, 62.87),
-  rectArea('A2', 47.80, 29.12, 70.20, 62.87),
-  rectArea('A3', 70.76, 29.58, 94.10, 63.02),
-  rectArea('A4', 27.09, 64.71, 46.67, 91.06),
-  rectArea('A5', 47.89, 64.71, 70.29, 89.52),
-  rectArea('A6', 70.76, 64.71, 93.72, 89.52),
-  rectArea('A7', 19.59, 62.87, 25.77, 91.06),
-  rectArea('A8', 48.08, 90.14, 63.92, 97.69),
-  rectArea('A9', 2.25, 5.70, 19.31, 99.08),
-  rectArea('A10', 19.21, 5.70, 99.25, 28.20),
-  rectArea('A11', 93.63, 28.20, 99.25, 93.99),
-]
+// The layout images only cover Factory 2 / KVH division.
+export const MAP_FACTORY = 'Factory 2'
+export const MAP_DIV = 'KVH'
 
-/** Floor 1 - Guide (Factory B) major areas A12-A21, calibrated against the Factory B reference layout. */
-const FLOOR1_GUIDE_AREAS: MapArea[] = [
-  rectArea('A12', 23.04, 12.54, 47.57, 49.27),
-  rectArea('A13', 48.22, 12.54, 81.44, 49.42),
-  rectArea('A14', 23.04, 50.15, 47.57, 88.92),
-  rectArea('A15', 48.22, 50.15, 81.44, 88.92),
-  rectArea('A16', 82.41, 21.28, 94.09, 88.92),
-  rectArea('A17', 0.39, 12.54, 22.32, 98.40),
-  rectArea('A18', 0.39, 1.75, 99.48, 11.22),
-  rectArea('A19', 82.41, 12.54, 94.09, 20.85),
-  rectArea('A20', 94.09, 12.24, 99.55, 88.92),
-  rectArea('A21', 23.04, 88.92, 99.48, 98.54),
-]
-
-/**
- * Floor 1 - Warehouse (WH) major areas A22-A29. A24 (extension warehouse) and A29 (diagonal lower strip)
- * follow the diagonal boundary, so they are explicit polygons rather than rectangles.
- */
-const FLOOR1_WAREHOUSE_AREAS: MapArea[] = [
-  rectArea('A22', 15.76, 5.22, 24.35, 39.20),
-  rectArea('A23', 15.76, 5.22, 84.24, 10.73),
-  {
-    code: 'A24',
-    points: [
-      { x: 24.35, y: 11.18 },
-      { x: 49.61, y: 11.18 },
-      { x: 49.61, y: 51.27 },
-      { x: 24.35, y: 34.13 },
-    ],
-  },
-  rectArea('A25', 49.61, 11.33, 65.76, 22.35),
-  rectArea('A26', 52.47, 22.50, 77.86, 64.08),
-  rectArea('A27', 78.91, 22.50, 84.38, 64.08),
-  rectArea('A28', 84.90, 5.22, 89.97, 85.99),
-  {
-    code: 'A29',
-    points: [
-      { x: 24.35, y: 34.13 },
-      { x: 84.12, y: 76.30 },
-      { x: 80.73, y: 84.35 },
-      { x: 25.52, y: 38.00 },
-    ],
-  },
-]
-
-/**
- * Floor 1 - Mold major areas A30-A39. The red reference annotation was drawn on this image rotated 90deg
- * clockwise; these are the same boundaries mapped back onto the live (portrait) image:
- * image x = reference y, image y = 100 - reference x. A36 follows the lower-left diagonal edge.
- */
-const FLOOR1_MOLD_AREAS: MapArea[] = [
-  rectArea('A30', 23.69, 61.75, 73.23, 69.25),
-  rectArea('A31', 11.91, 37.58, 49.93, 61.58),
-  rectArea('A32', 11.91, 18.92, 49.93, 37.50),
-  rectArea('A33', 11.78, 11.08, 69.48, 18.83),
-  rectArea('A34', 50.20, 37.50, 83.94, 61.50),
-  rectArea('A35', 50.33, 19.00, 83.94, 37.42),
-  {
-    code: 'A36',
-    points: [
-      { x: 73.23, y: 94.42 },
-      { x: 23.69, y: 70.67 },
-      { x: 23.69, y: 69.42 },
-      { x: 99.60, y: 69.42 },
-      { x: 99.60, y: 94.42 },
-    ],
-  },
-  rectArea('A37', 4.15, 11.08, 11.78, 62.42),
-  rectArea('A38', 11.91, 0.92, 83.80, 11.00),
-  rectArea('A39', 84.07, 0.92, 99.60, 69.42),
-]
-
-/** Floor 2 - All major areas A40-A43 (child zones stay markers). A41 is the bridge corridor between A40 and A42. */
-const FLOOR2_ALL_AREAS: MapArea[] = [
-  rectArea('A40', 3.47, 7.18, 29.62, 70.10),
-  rectArea('A41', 29.52, 35.34, 56.83, 43.88),
-  rectArea('A42', 56.83, 15.53, 96.22, 52.82),
-  rectArea('A43', 58.09, 61.75, 65.23, 93.59),
-]
+export type LayoutId = 'floor1' | 'floor2' | 'floor3' | 'floor4' | 'floor5'
+// Building is not a layout property: it comes from each zone's `fac` in GET /api/locations (utils/locationCatalog).
 
 export const FLOORS = [
   {
@@ -159,6 +61,8 @@ export const FLOORS = [
     imgH: 718,
     imageData: floor1Press,
     areas: FLOOR1_PRESS_AREAS,
+    subAreas: SUB_AREAS.floor1,
+    dbFloor: "1F",
   },
   {
     id: "floor2",
@@ -198,6 +102,8 @@ export const FLOORS = [
     imgH: 509,
     imageData: floor1Guide,
     areas: FLOOR1_GUIDE_AREAS,
+    subAreas: SUB_AREAS.floor2,
+    dbFloor: "1F",
   },
   {
     id: "floor3",
@@ -216,6 +122,8 @@ export const FLOORS = [
     imgH: 754,
     imageData: floor1Warehouse,
     areas: FLOOR1_WAREHOUSE_AREAS,
+    subAreas: SUB_AREAS.floor3,
+    dbFloor: "1F",
   },
   {
     id: "floor4",
@@ -247,6 +155,8 @@ export const FLOORS = [
     imgH: 737,
     imageData: floor1Mold,
     areas: FLOOR1_MOLD_AREAS,
+    subAreas: SUB_AREAS.floor4,
+    dbFloor: "1F",
     // Source drawing orientation = this image turned 90deg clockwise (see FLOOR1_MOLD_AREAS note).
     rotationDeg: 90,
   },
@@ -273,5 +183,10 @@ export const FLOORS = [
     imgH: 717,
     imageData: floor2All,
     areas: FLOOR2_ALL_AREAS,
+    subAreas: SUB_AREAS.floor5,
+    dbFloor: "2F",
   },
 ] as const
+
+/** Zone code (major, sub-zone or marker) -> id of the layout that draws it. */
+export const ZONE_INDEX: ReadonlyMap<string, LayoutId> = buildZoneIndex(FLOORS)

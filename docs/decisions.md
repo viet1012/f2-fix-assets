@@ -1,0 +1,12 @@
+# Relocation decisions (MVP)
+- Phạm vi: Factory 2, mọi div
+- Toà nhà: lấy từ `fac` của GET /api/locations (không gắn theo layout; đã bỏ LAYOUT_BUILDING). Nhãn: Fac_A→Toà A, Fac_B→Toà B, Fac_C→Toà C, WH_RM→Kho (en: Building A/B/C, Warehouse); giá trị khác hiện nguyên văn
+- Danh mục zone: gộp dòng MAP theo (fac, positionA, positionAA), cộng assetCount; tầng lấy theo layout vẽ zone (zoneIndex), bỏ qua `floor` của dòng MAP; bỏ qua aPos/aaPos
+- Outside: không bao giờ là đích; máy đang ở Outside (mapFac, hoặc zone thuộc Outside) không chọn được, báo lỗi riêng
+- allowedKinds: Machinery, Tools, Furniture and Fixtures   # sửa theo đúng giá trị kind trong DB
+- Đích: sub-zone, hoặc khu lớn không có zone con
+- Dữ liệu lệch: tin zone hơn floor, đưa zone không có trên bản vẽ vào tray
+- Người yêu cầu: nhập mã nhân viên (MVP)
+- Hoàn tất di dời: KHÔNG ghi vào F2_FIXED_ASSET
+- Status: chỉ PENDING; một đích cho tất cả máy; chặn máy đang có yêu cầu PENDING; không cho chọn ngày trong quá khứ
+- Tab riêng, dữ liệu lấy từ GET /api/assets/with-location và GET /api/locations, có dark mode và vi/en

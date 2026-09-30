@@ -3,6 +3,7 @@ import AutoGraphOutlined from '@mui/icons-material/AutoGraphOutlined'
 import DashboardOutlined from '@mui/icons-material/DashboardOutlined'
 import MapOutlined from '@mui/icons-material/MapOutlined'
 import MenuBookOutlined from '@mui/icons-material/MenuBookOutlined'
+import MoveUpOutlined from '@mui/icons-material/MoveUpOutlined'
 import ReportProblemOutlined from '@mui/icons-material/ReportProblemOutlined'
 import TableRowsOutlined from '@mui/icons-material/TableRowsOutlined'
 import type { ReactElement } from 'react'
@@ -13,6 +14,7 @@ export const tabs: Array<{ key: AppTab; vi: string; en: string; icon: ReactEleme
   { key: 'overview', vi: 'Tổng quan', en: 'Overview', icon: <DashboardOutlined fontSize="small" /> },
   { key: 'table', vi: 'Danh sách chi tiết', en: 'Details', icon: <TableRowsOutlined fontSize="small" /> },
   { key: 'map', vi: 'Sơ đồ vị trí', en: 'Location map', icon: <MapOutlined fontSize="small" /> },
+  { key: 'relocation', vi: 'Di dời máy', en: 'Relocation', icon: <MoveUpOutlined fontSize="small" /> },
   { key: 'issues', vi: 'Sai lệch FI', en: 'FI Issues', icon: <ReportProblemOutlined fontSize="small" /> },
   { key: 'forecast', vi: 'Dự báo tương lai', en: 'Forecast', icon: <AutoGraphOutlined fontSize="small" /> },
   { key: 'guide', vi: 'Hướng dẫn', en: 'Guide', icon: <MenuBookOutlined fontSize="small" /> },

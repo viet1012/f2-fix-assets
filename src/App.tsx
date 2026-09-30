@@ -25,9 +25,11 @@ const GuideTab = lazy(() => import('./components/guide/GuideTab'))
 const loadAssetTable = () => import('./components/table/AssetTable')
 const loadIssuesTab = () => import('./components/issues/IssuesTab')
 const loadForecastTab = () => import('./components/forecast/ForecastTab')
+const loadRelocationTab = () => import('./components/relocation/RelocationTab')
 const AssetTable = lazy(() => loadAssetTable().then((m) => ({ default: m.AssetTable })))
 const IssuesTab = lazy(() => loadIssuesTab().then((m) => ({ default: m.IssuesTab })))
 const ForecastTab = lazy(() => loadForecastTab().then((m) => ({ default: m.ForecastTab })))
+const RelocationTab = lazy(loadRelocationTab)
 
 /**
  * Warm the browser module cache for the lazy tabs during idle time, so the first switch is instant.
@@ -37,7 +39,7 @@ const ForecastTab = lazy(() => loadForecastTab().then((m) => ({ default: m.Forec
 function prefetchTabModules(): () => void {
   const run = () => {
     // A failed prefetch is harmless; the real lazy() import retries when the tab is opened.
-    for (const load of [loadAssetTable, loadIssuesTab, loadForecastTab]) load().catch(() => {})
+    for (const load of [loadAssetTable, loadIssuesTab, loadForecastTab, loadRelocationTab]) load().catch(() => {})
   }
   if (typeof window.requestIdleCallback === 'function') {
     const id = window.requestIdleCallback(run, { timeout: 3000 })
@@ -47,7 +49,7 @@ function prefetchTabModules(): () => void {
   return () => globalThis.clearTimeout(id)
 }
 
-const DATA_TABS: AppTab[] = ['overview', 'table', 'map', 'issues', 'forecast']
+const DATA_TABS: AppTab[] = ['overview', 'table', 'map', 'relocation', 'issues', 'forecast']
 
 interface PanelProps {
   tab: AppTab
@@ -106,6 +108,8 @@ export function App() {
       case 'overview': return <OverviewTab rows={tabRows} lang={lang} />
       case 'table': return <AssetTable rows={tabRows} lang={lang} />
       case 'map': return <MapTab rows={tabRows} lang={lang} />
+      // Relocation loads its own data from the location API.
+      case 'relocation': return <RelocationTab lang={lang} />
       case 'issues': return <IssuesTab rows={tabRows} lang={lang} />
       case 'forecast': return <ForecastTab rows={tabRows} lang={lang} />
       default: return null

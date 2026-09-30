@@ -63,5 +63,5 @@ export interface DashboardFilters {
   status: string
 }
 
-export type AppTab = 'overview' | 'table' | 'map' | 'issues' | 'forecast' | 'guide'
+export type AppTab = 'overview' | 'table' | 'map' | 'relocation' | 'issues' | 'forecast' | 'guide'
 export type Lang = 'vi' | 'en'

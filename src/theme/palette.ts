@@ -24,6 +24,13 @@ export const tokens = {
     info: '#0369a1',
     gridLine: 'rgba(15, 23, 42, 0.08)',
     shadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06)',
+    // Relocation map (drawn on the white layout image): source, destination, destination on another layout, unrelated,
+    // old location. Contrast on white: from 5.2:1, to 5.5:1, cross 7.1:1 (also enough for white chip / pill text).
+    relocFrom: '#c2410c',
+    relocTo: '#047857',
+    relocOld: '#64748b',
+    relocCross: '#6d28d9',
+    relocDim: '#94a3b8',
   },
   dark: {
     background: '#0b1220',
@@ -44,6 +51,11 @@ export const tokens = {
     info: '#38bdf8',
     gridLine: 'rgba(148, 163, 184, 0.12)',
     shadow: '0 1px 2px rgba(0, 0, 0, 0.3)',
+    relocFrom: '#fbbf24',
+    relocTo: '#34d399',
+    relocOld: '#94a3b8',
+    relocCross: '#a78bfa',
+    relocDim: '#64748b',
   },
 } as const satisfies Record<PaletteMode, Record<string, string>>
 
@@ -55,3 +67,9 @@ export const categoricalPalette: Record<PaletteMode, string[]> = {
   light: ['#2563eb', '#0d9488', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d', '#ea580c', '#4f46e5', '#64748b', '#be123c', '#0f766e'],
   dark: ['#60a5fa', '#2dd4bf', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#a3e635', '#fb923c', '#818cf8', '#94a3b8', '#fb7185', '#5eead4'],
 }
+
+/**
+ * Major-zone colours on the relocation map (strong pastels on the grey, faded drawing): red, blue, violet, yellow,
+ * teal, pink, sky, olive. No orange or dark green (reserved for from / to). Majors without sub-zones use slate.
+ */
+export const zonePalette: readonly string[] = ['#dc2626', '#2563eb', '#7c3aed', '#ca8a04', '#0d9488', '#db2777', '#0284c7', '#65a30d']
