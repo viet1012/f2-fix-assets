@@ -1,6 +1,6 @@
 import { Alert, Autocomplete, Box, Card, Stack, Tab, Tabs, TextField, Typography } from '@mui/material'
 import { useMemo, useState } from 'react'
-import { FLOORS } from '../../data/legacyData'
+import { FLOORS } from '../../data/mapData'
 import type { FixedAsset, Lang } from '../../types/fixedAsset'
 import { uniq } from '../../utils/fixedAsset'
 import { FloorMap, type MapZone } from './FloorMap'
@@ -30,7 +30,7 @@ function layoutDbFloor(title: string): string | null {
 function LegendDot({ color, label, ring = false }: { color: string; label: string; ring?: boolean }) {
   return (
     <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-      <Box aria-hidden sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: color, border: '2px solid #fff', boxShadow: ring ? (t) => `0 0 0 2px ${t.palette.error.light}` : '0 0 0 1px rgba(0,0,0,.15)' }} />
+      <Box aria-hidden sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: color, border: '2px solid #fff', boxShadow: ring ? '0 0 0 2px rgba(37,99,235,.35)' : '0 0 0 1px rgba(0,0,0,.15)' }} />
       <Typography variant="caption" color="text.secondary">{label}</Typography>
     </Stack>
   )
@@ -98,7 +98,7 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
           <Stack direction="row" spacing={2} useFlexGap sx={(theme) => ({ ...glassFloating(theme, glassRadius.capsule), position: 'relative', flexWrap: 'wrap', px: 1.5, py: 0.75 })} aria-label={vi ? 'Chú giải' : 'Legend'}>
             <LegendDot color="#2563eb" label={vi ? 'Có tài sản (số lượng)' : 'Has assets (count)'} />
             <LegendDot color="#64748b" label={vi ? 'Không có tài sản' : 'No assets'} />
-            <LegendDot color="error.main" label={vi ? 'Đang chọn' : 'Selected'} ring />
+            <LegendDot color="#1d4ed8" label={vi ? 'Đang chọn' : 'Selected'} ring />
           </Stack>
         </Stack>
       </Stack>
@@ -113,6 +113,8 @@ export default function MapTab({ rows, lang }: { rows: FixedAsset[]; lang: Lang 
             imgW={floor.imgW}
             imgH={floor.imgH}
             zones={zones}
+            areas={'areas' in floor ? floor.areas : undefined}
+            rotationDeg={'rotationDeg' in floor ? floor.rotationDeg : undefined}
             selectedZone={zone}
             onSelectZone={setZone}
           />

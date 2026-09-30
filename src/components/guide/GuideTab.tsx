@@ -5,7 +5,7 @@ import CloseRounded from '@mui/icons-material/CloseRounded'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import MenuBookOutlined from '@mui/icons-material/MenuBookOutlined'
 import { useState, type ReactNode } from 'react'
-import { GUIDE_DATA } from '../../data/legacyData'
+import { GUIDE_DATA } from '../../data/guideData'
 import type { Lang } from '../../types/fixedAsset'
 import { density } from '../../theme/density'
 
@@ -15,8 +15,8 @@ const cats = [
 
 function imageSrc(key?: string) {
   if (!key) return ''
-  const value = (GUIDE_DATA.images as Record<string, string>)[key]
-  return value ? `data:image/jpeg;base64,${value}` : ''
+  // Values are bundled asset URLs (src/assets/guide), usable directly as <img src>.
+  return (GUIDE_DATA.images as Record<string, string>)[key] ?? ''
 }
 
 interface Lightbox { src: string; alt: string }

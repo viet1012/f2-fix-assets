@@ -1,15 +1,12 @@
 import { Box } from '@mui/material'
-import { lazy, memo, Suspense, useCallback, useDeferredValue, useMemo, useState, type ReactNode } from 'react'
+import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ErrorState, LoadingState } from './components/common/States'
 import { DashboardTabs, tabId, tabPanelId } from './components/dashboard/DashboardTabs'
 import { Header } from './components/dashboard/Header'
 import { SummaryCards } from './components/dashboard/SummaryCards'
 import { UploadBar } from './components/dashboard/UploadBar'
 import { FilterBar } from './components/filters/FilterBar'
-import { ForecastTab } from './components/forecast/ForecastTab'
-import { IssuesTab } from './components/issues/IssuesTab'
 import { OverviewTab } from './components/overview/OverviewTab'
-import { AssetTable } from './components/table/AssetTable'
 import { useAssetFilters } from './hooks/useAssetFilters'
 import { useFixedAssets } from './hooks/useFixedAssets'
 import { useLanguage } from './hooks/useLanguage'
@@ -19,9 +16,36 @@ import type { AppTab } from './types/fixedAsset'
 import { issueKinds } from './utils/fixedAsset'
 import { density } from './theme/density'
 
-// Map (layout images in src/assets/maps) and Guide (base64 guide images in legacyData.ts) load on demand.
+// Map (data/mapData + assets/maps) and Guide (data/guideData + assets/guide) are separate lazy chunks.
 const MapTab = lazy(() => import('./components/map/MapTab'))
 const GuideTab = lazy(() => import('./components/guide/GuideTab'))
+
+// Non-default tabs: lazy chunks, prefetched at idle once data is ready (see prefetchTabModules).
+// Overview stays eager: it is the default tab and needs Chart.js on first paint.
+const loadAssetTable = () => import('./components/table/AssetTable')
+const loadIssuesTab = () => import('./components/issues/IssuesTab')
+const loadForecastTab = () => import('./components/forecast/ForecastTab')
+const AssetTable = lazy(() => loadAssetTable().then((m) => ({ default: m.AssetTable })))
+const IssuesTab = lazy(() => loadIssuesTab().then((m) => ({ default: m.IssuesTab })))
+const ForecastTab = lazy(() => loadForecastTab().then((m) => ({ default: m.ForecastTab })))
+
+/**
+ * Warm the browser module cache for the lazy tabs during idle time, so the first switch is instant.
+ * Loads JS only: these modules have no top-level side effects (no fetch/storage) until rendered.
+ * Returns a cancel function for effect cleanup.
+ */
+function prefetchTabModules(): () => void {
+  const run = () => {
+    // A failed prefetch is harmless; the real lazy() import retries when the tab is opened.
+    for (const load of [loadAssetTable, loadIssuesTab, loadForecastTab]) load().catch(() => {})
+  }
+  if (typeof window.requestIdleCallback === 'function') {
+    const id = window.requestIdleCallback(run, { timeout: 3000 })
+    return () => window.cancelIdleCallback(id)
+  }
+  const id = globalThis.setTimeout(run, 1500)
+  return () => globalThis.clearTimeout(id)
+}
 
 const DATA_TABS: AppTab[] = ['overview', 'table', 'map', 'issues', 'forecast']
 
@@ -69,6 +93,12 @@ export function App() {
   const initialError = !hasLoaded && status.type === 'error' && status.operation === 'load'
 
   const dataReady = !initialLoading && !initialError
+
+  // Prefetch lazy tab code only after the first data load has settled (never during first paint).
+  useEffect(() => {
+    if (hasLoaded) return prefetchTabModules()
+  }, [hasLoaded])
+
   const suspenseFallback = <LoadingState label={vi ? 'Đang tải...' : 'Loading...'} />
 
   const renderDataTab = (key: AppTab) => {
