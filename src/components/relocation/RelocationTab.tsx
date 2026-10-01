@@ -18,12 +18,12 @@ import { buildRequestItems, pendingCodesOf, rowsInZone, sourceZonesByFac } from 
 import { SectionCard } from '../common/SectionCard'
 import { DEFAULT_MAP_VIEW, type MapView } from '../map/MapScene'
 import { ErrorState, LoadingState } from '../common/States'
-import { MachinePicker } from './MachinePicker'
+import { MachinePicker, SelectionSummary } from './MachinePicker'
 import { RelocationFloorMap } from './RelocationFloorMap'
 import { RelocationForm } from './RelocationForm'
 import { RelocationRequestsTable } from './RelocationRequestsTable'
 import { RelocationSummary } from './RelocationSummary'
-import { TargetLocationSelect } from './TargetLocationSelect'
+import { RouteLine, TargetLocationSelect, type Route, type RouteBadge } from './TargetLocationSelect'
 import { RelocationMapToolbar } from './RelocationMapToolbar'
 import { ZoneBrowseSelect } from './ZoneBrowseSelect'
 import { ZoneMachineList } from './ZoneMachineList'
@@ -37,19 +37,6 @@ function CardTitle({ color, children }: { color: string; children: ReactNode }) 
   return (
     <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, fontWeight: 700 }}>
       <Box component="span" aria-hidden sx={{ width: 12, height: 12, borderRadius: '2px', bgcolor: color, flexShrink: 0 }} />
-      {children}
-    </Box>
-  )
-}
-
-/** Small rounded chip used in the route line. */
-function RouteChip({ color, solid = false, children, testId }: { color: string; solid?: boolean; children: ReactNode; testId?: string }) {
-  return (
-    <Box
-      component="span"
-      data-testid={testId}
-      sx={{ px: 1, py: 0.25, borderRadius: '999px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: solid ? '#ffffff' : color, bgcolor: solid ? color : alpha(color, 0.14) }}
-    >
       {children}
     </Box>
   )
@@ -158,10 +145,12 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
   const sourcePlaces = [...new Set(moves.map((m) => { const id = rowLayoutId(m.row, ctx.index); return id ? placeOf(id, rowFac(m.row, ctx)) : m.row.floor ?? '-' }))]
   const afterBorder = moveKind === 'cross' ? `2px solid ${MAP.relocCross}` : moveKind === 'same' ? `2px solid ${MAP.relocTo}` : undefined
   // "Đổi toà" / "Đổi tầng": solid purple; "Cùng tầng": light green.
-  const badges: { key: string; label: string; solid: boolean; color: string }[] = []
+  const badges: RouteBadge[] = []
   if (kinds.has('building')) badges.push({ key: 'building', label: vi ? 'Đổi toà' : 'Building change', solid: true, color: MAP.relocCross })
   if (kinds.has('floor')) badges.push({ key: 'floor', label: vi ? 'Đổi tầng' : 'Floor change', solid: true, color: MAP.relocCross })
   if (kinds.has('same')) badges.push({ key: 'same', label: vi ? 'Cùng tầng' : 'Same floor', solid: false, color: MAP.relocTo })
+  const route: Route | null = target && moves.length ? { count: moves.length, dest: `${destPlace} / ${target.zone}`, badges } : null
+  const routeColors = { from: MAP.relocFrom, to: MAP.relocTo }
 
   const setTarget = (target: RelocationTarget | null) => {
     if (target) setAfterLayoutId(target.layoutId)
@@ -208,7 +197,13 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
       )}
       {lastId && <Alert severity="success" onClose={() => setLastId(null)}>{vi ? `Đã gửi yêu cầu ${lastId}.` : `Request ${lastId} submitted.`}</Alert>}
 
-      <SectionCard title={vi ? '1. Chọn máy' : '1. Pick machines'}>
+      {/* Pick machines + destination side by side (3fr / 2fr) from lg, stacked below; equal heights. */}
+      <Box sx={{ display: 'grid', gap: density.gap, alignItems: 'stretch', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' } }}>
+      <SectionCard
+        title={vi ? '1. Chọn máy' : '1. Pick machines'}
+        actions={<SelectionSummary lang={lang} selectedRows={draft.selectedRows} onClear={draft.clear} />}
+        sx={{ height: '100%' }}
+      >
         <MachinePicker
           lang={lang}
           rows={rows}
@@ -225,7 +220,7 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
         />
       </SectionCard>
 
-      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'}>
+      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={{ height: '100%' }}>
         <TargetLocationSelect
           lang={lang}
           layouts={FLOORS}
@@ -234,8 +229,11 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
           catalog={catalog}
           onLayoutChange={setAfterLayoutId}
           onTargetChange={setTarget}
+          route={route}
+          routeColors={routeColors}
         />
       </SectionCard>
+      </Box>
 
       <Stack spacing={1}>
         <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} />
@@ -322,16 +320,7 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
                   {kinds.has('building') ? (vi ? 'Đổi toà' : 'Building change') : vi ? 'Đổi tầng' : 'Floor change'}: {sourcePlaces.join(', ')} → {destPlace}
                 </Box>
               )}
-              {target && moves.length > 0 && (
-                <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }} data-testid="reloc-route">
-                  <RouteChip color={MAP.relocFrom}>{moves.length} {vi ? 'máy' : moves.length === 1 ? 'machine' : 'machines'}</RouteChip>
-                  <Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>→</Box>
-                  <RouteChip color={MAP.relocTo}>{destPlace} / {target.zone}</RouteChip>
-                  {badges.map((bd) => (
-                    <RouteChip key={bd.key} color={bd.color} solid={bd.solid} testId={`reloc-badge-${bd.key}`}>{bd.label}</RouteChip>
-                  ))}
-                </Stack>
-              )}
+              {route && <RouteLine lang={lang} route={route} fromColor={routeColors.from} toColor={routeColors.to} testId="reloc" />}
             </Stack>
           {afterLayout ? (
             <RelocationFloorMap
@@ -368,13 +357,16 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
         )}
       </Box>
 
-      <SectionCard title={vi ? '3. Tóm tắt' : '3. Summary'}>
-        <RelocationSummary lang={lang} rows={draft.selectedRows} target={draft.target} zoneCount={zoneCount} ctx={ctx} />
-      </SectionCard>
+      {/* Summary + request details side by side (11fr / 9fr) from lg, stacked below; equal heights. */}
+      <Box sx={{ display: 'grid', gap: density.gap, alignItems: 'stretch', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 11fr) minmax(0, 9fr)' } }}>
+        <SectionCard title={vi ? '3. Tóm tắt' : '3. Summary'} sx={{ height: '100%' }}>
+          <RelocationSummary lang={lang} rows={draft.selectedRows} target={draft.target} zoneCount={zoneCount} ctx={ctx} />
+        </SectionCard>
 
-      <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'}>
-        <RelocationForm lang={lang} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} />
-      </SectionCard>
+        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={{ height: '100%' }}>
+          <RelocationForm lang={lang} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} />
+        </SectionCard>
+      </Box>
 
       <SectionCard title={vi ? 'Yêu cầu đã gửi' : 'Submitted requests'}>
         <RelocationRequestsTable lang={lang} requests={requests} loading={loading} />

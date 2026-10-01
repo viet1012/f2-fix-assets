@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearLocationCache } from '../../hooks/useLocations'
 import { SAMPLE_ASSETS, SAMPLE_LOCATIONS } from '../../test/locationSample'
@@ -179,7 +179,7 @@ describe('RelocationTab - map cards', () => {
   const pickTarget = (building: string, floor: string, zone: string) => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: building }))
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng' }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
     fireEvent.click(screen.getByRole('option', { name: floor }))
     fireEvent.click(afterCard().querySelector('.reloc-zone[data-zone="' + zone + '"]')!)
   }
@@ -218,7 +218,7 @@ describe('RelocationTab - map cards', () => {
     render(<RelocationTab lang="vi" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
-    pickTarget('Toà A', 'Floor 1 - Press', 'A1-1')
+    pickTarget('Toà A', '1F · Press', 'A1-1')
     expect(afterCard().getAttribute('data-move')).toBe('same')
     expect(getComputedStyle(cardOf(afterCard())).borderTopColor).toBe('rgb(4, 120, 87)')
     expect(screen.queryByTestId('reloc-cross-banner')).toBeNull()
@@ -232,11 +232,25 @@ describe('RelocationTab - map cards', () => {
     render(<RelocationTab lang="vi" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
-    pickTarget('Toà B', 'Floor 1 - Guide', 'A15-3')
+    pickTarget('Toà B', '1F · Guide', 'A15-3')
     expect(afterCard().getAttribute('data-move')).toBe('cross')
     expect(screen.getByTestId('reloc-cross-banner').textContent).toBe('Đổi toà: Toà A / 1F → Toà B / 1F')
     expect(getComputedStyle(cardOf(afterCard())).borderTopColor).toBe('rgb(109, 40, 217)')
     const badge = screen.getByTestId('reloc-badge-building')
+    expect(badge.textContent).toBe('Đổi toà')
+    expect(getComputedStyle(badge).backgroundColor).toBe('rgb(109, 40, 217)')
+  })
+
+  it('summary: one "Từ → Đến" column and a purple (not red) "Đổi toà" badge', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" />)
+    await screen.findByLabelText('Chọn máy')
+    pasteCodes('A-006-1 A-006-2')
+    pickTarget('Toà B', '1F · Guide', 'A15-3')
+    const summary = screen.getByRole('table', { name: 'Tóm tắt di dời' })
+    expect(within(summary).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Mã', 'Tên', 'Từ → Đến', 'Loại'])
+    expect(screen.getByTestId('summary-route-A-006-1').textContent).toMatch(/^Toà A \/ 1F \/ \S+ → Toà B \/ 1F \/ A15-3$/)
+    const badge = screen.getByTestId('summary-badge-A-006-1')
     expect(badge.textContent).toBe('Đổi toà')
     expect(getComputedStyle(badge).backgroundColor).toBe('rgb(109, 40, 217)')
   })
@@ -246,6 +260,73 @@ describe('RelocationTab - map cards', () => {
     render(<RelocationTab lang="en" />)
     await screen.findByLabelText('Pick machines')
     expect(screen.getByTestId('reloc-legend').textContent).toBe('Current locationOld locationNew locationFrom/To another building')
+  })
+})
+
+describe('RelocationTab - pick + destination row', () => {
+  it('"✓ added" note next to the hint, hidden again after 3s; errors stay as alerts', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" />)
+    await screen.findByLabelText('Chọn máy')
+    vi.useFakeTimers()
+    try {
+      pasteCodes('A-006-1 A-008-1')
+      const note = screen.getByTestId('added-note')
+      expect(note.textContent).toBe('✓ Đã thêm 1 máy')
+      expect(note.getAttribute('aria-live')).toBe('polite')
+      expect(document.querySelector('[data-report="wrongKind"]')).not.toBeNull()
+      act(() => vi.advanceTimersByTime(2999))
+      expect(note.textContent).toBe('✓ Đã thêm 1 máy')
+      act(() => vi.advanceTimersByTime(1))
+      expect(note.textContent).toBe('')
+      expect(document.querySelector('[data-report="wrongKind"]')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('selection summary and "Remove all" live in the card header; the table has no asset-type column', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" />)
+    await screen.findByLabelText('Chọn máy')
+    pasteCodes('A-006-1 A-007-1')
+    const header = screen.getByTestId('selected-count').closest('.MuiCard-root')!.firstElementChild!
+    expect(header.textContent).toContain('Đã chọn 2 máy từ 2 zone')
+    expect(within(header as HTMLElement).getByRole('button', { name: 'Xoá tất cả' })).toBeTruthy()
+    const table = screen.getByRole('table', { name: 'Máy đã chọn' })
+    expect([...table.querySelectorAll('th')].map((th) => th.textContent)).toEqual(['Mã', 'Tên', 'Vị trí', ''])
+  })
+
+  it('floor options read "1F · Press", zone options "A1-1 · 26 máy"', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" />)
+    await screen.findByLabelText('Chọn máy')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['1F · Press', '2F · All'])
+    fireEvent.click(screen.getByRole('option', { name: '1F · Press' }))
+    const zoneInput = screen.getByRole('combobox', { name: 'Zone' })
+    fireEvent.mouseDown(zoneInput)
+    fireEvent.keyDown(zoneInput, { key: 'ArrowDown' })
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toContain('A1-1 · 26 máy')
+  })
+
+  it('the destination card shows the route "N máy → Toà / floor / zone" with move badges', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" />)
+    await screen.findByLabelText('Chọn máy')
+    pasteCodes('A-006-1 A-006-2')
+    expect(screen.queryByTestId('target-route')).toBeNull()
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Toà B' }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
+    fireEvent.click(screen.getByRole('option', { name: '1F · Guide' }))
+    fireEvent.click(screen.getByTestId('reloc-after-card').querySelector('.reloc-zone[data-zone="A15-3"]')!)
+    expect(screen.getByTestId('target-route').textContent).toBe('2 máy→Toà B / 1F / A15-3Đổi toà')
+    expect(screen.getByTestId('target-badge-building').textContent).toBe('Đổi toà')
+    // Same component as the After card's route line.
+    expect(screen.getByTestId('reloc-route').textContent).toBe(screen.getByTestId('target-route').textContent)
   })
 })
 

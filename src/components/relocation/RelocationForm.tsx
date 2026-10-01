@@ -41,8 +41,9 @@ export function RelocationForm({ lang, value, onChange, moverCount, submitting =
   return (
     <Box component="form" noValidate onSubmit={submit} aria-label={vi ? 'Thông tin yêu cầu' : 'Request details'}>
       <Stack spacing={1.5} sx={(theme) => ({ ...glassFilterControls(theme), '& .MuiInputBase-multiline.MuiOutlinedInput-root': { height: 'auto' } })}>
-        <TextField size="small" required label={vi ? 'Mã nhân viên' : 'Employee ID'} value={value.requestedBy} onChange={set('requestedBy')} error={!!shown.requestedBy} helperText={msg('requestedBy')} />
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+        {/* Row 1: employee · planned · completion (one per line on narrow screens). */}
+        <Box sx={{ display: 'grid', gap: 1.5, alignItems: 'start', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(3, minmax(0, 1fr))' } }}>
+          <TextField size="small" required fullWidth label={vi ? 'Mã nhân viên' : 'Employee ID'} value={value.requestedBy} onChange={set('requestedBy')} error={!!shown.requestedBy} helperText={msg('requestedBy')} />
           <TextField
             size="small"
             required
@@ -67,15 +68,28 @@ export function RelocationForm({ lang, value, onChange, moverCount, submitting =
             helperText={msg('dEnd')}
             slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: value.dStart || today } }}
           />
-        </Stack>
-        <TextField size="small" required multiline minRows={2} label={vi ? 'Lý do' : 'Reason'} value={value.reason} onChange={set('reason')} error={!!shown.reason} helperText={msg('reason')} />
-        {moverCount === 0 && <Alert severity="info" sx={{ py: 0 }}>{vi ? 'Không có máy nào cần di chuyển.' : 'No machine needs to move.'}</Alert>}
-        {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
-        <Box>
-          <Button type="submit" variant="contained" disabled={moverCount === 0 || submitting}>
+        </Box>
+        {/* Row 2: reason (grows) + submit on the right; stacked with a full-width button on narrow screens. */}
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ alignItems: { xs: 'stretch', sm: 'flex-start' } }}>
+          <TextField
+            size="small"
+            required
+            multiline
+            minRows={1}
+            maxRows={3}
+            sx={{ flex: 1 }}
+            label={vi ? 'Lý do' : 'Reason'}
+            value={value.reason}
+            onChange={set('reason')}
+            error={!!shown.reason}
+            helperText={msg('reason')}
+          />
+          <Button type="submit" variant="contained" disabled={moverCount === 0 || submitting} sx={{ minHeight: 40, flexShrink: 0, whiteSpace: 'nowrap', width: { xs: '100%', sm: 'auto' } }}>
             {vi ? `Gửi yêu cầu (${moverCount} máy)` : `Submit request (${moverCount} machines)`}
           </Button>
-        </Box>
+        </Stack>
+        {moverCount === 0 && <Alert severity="info" sx={{ py: 0 }}>{vi ? 'Không có máy nào cần di chuyển.' : 'No machine needs to move.'}</Alert>}
+        {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
       </Stack>
     </Box>
   )

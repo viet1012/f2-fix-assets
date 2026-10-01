@@ -1,6 +1,6 @@
 import type { AssetsResponse, UploadResponse } from '../types/fixedAsset'
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
 
 export async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => ({}))

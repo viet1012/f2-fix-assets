@@ -1,17 +1,21 @@
-import { Chip, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material'
+import { Chip, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
 import type { Lang } from '../../types/fixedAsset'
 import type { AssetLocation } from '../../types/location'
 import type { RelocationTarget } from '../../types/relocation'
 import { facLabel } from '../../config/relocation'
+import { tokens } from '../../theme/palette'
 import { DEFAULT_CONTEXT, rowFac, rowLayoutId, targetFac, type RelocationContext, type RelocationRow } from '../../utils/relocation'
 import { moveBadgeOf, type MoveBadge } from '../../utils/relocationInput'
 import { countLabel } from './TargetLocationSelect'
 
 type Row = RelocationRow & Pick<AssetLocation, 'code' | 'name'>
 
-const BADGES: Record<MoveBadge, { vi: string; en: string; color: 'error' | 'warning' | 'info' | 'default' | 'secondary' }> = {
-  building: { vi: 'Đổi toà', en: 'Building change', color: 'error' },
-  floor: { vi: 'Đổi tầng', en: 'Floor change', color: 'warning' },
+/** Same purple as the "other layout" arrows / pills on the map (solid, white text in both theme modes). */
+const CROSS = tokens.light.relocCross
+
+const BADGES: Record<MoveBadge, { vi: string; en: string; color: 'info' | 'default' | 'secondary'; cross?: boolean }> = {
+  building: { vi: 'Đổi toà', en: 'Building change', color: 'default', cross: true },
+  floor: { vi: 'Đổi tầng', en: 'Floor change', color: 'default', cross: true },
   same: { vi: 'Cùng tầng', en: 'Same floor', color: 'info' },
   none: { vi: 'Không đổi', en: 'No change', color: 'default' },
   unknownBuilding: { vi: 'Chưa xác định toà', en: 'Building unknown', color: 'secondary' },
@@ -39,6 +43,7 @@ export function RelocationSummary({ lang, rows, target, zoneCount, ctx = DEFAULT
     const from = fromId === null ? undefined : ctx.layouts.find((l) => l.id === fromId)
     return { row: r, badge: moveBadgeOf(r, target, ctx), from: describe(rowFac(r, ctx), from?.dbFloor ?? r.floor, r.currentZone) }
   })
+  const toText = describe(targetFac(target, ctx), to?.dbFloor, target.zone)
   const moving = items.filter((i) => i.badge !== 'none').length
 
   return (
@@ -47,14 +52,13 @@ export function RelocationSummary({ lang, rows, target, zoneCount, ctx = DEFAULT
         {vi ? 'Đích' : 'Destination'} <strong>{target.zone}</strong>: {countLabel(target.zone, zoneCount.get(target.zone) ?? 0, vi)} {vi ? 'hiện có' : 'there now'} ·{' '}
         {vi ? 'Sẽ di chuyển' : 'Moving'} <strong>{moving}</strong> / {items.length}
       </Typography>
-      <TableContainer sx={{ maxHeight: 320 }}>
+      <TableContainer sx={{ maxHeight: 200 }}>
         <Table size="small" stickyHeader aria-label={vi ? 'Tóm tắt di dời' : 'Relocation summary'}>
           <TableHead>
             <TableRow>
               <TableCell>{vi ? 'Mã' : 'Code'}</TableCell>
               <TableCell>{vi ? 'Tên' : 'Name'}</TableCell>
-              <TableCell>{vi ? 'Từ' : 'From'}</TableCell>
-              <TableCell>{vi ? 'Đến' : 'To'}</TableCell>
+              <TableCell>{vi ? 'Từ → Đến' : 'From → To'}</TableCell>
               <TableCell>{vi ? 'Loại' : 'Type'}</TableCell>
             </TableRow>
           </TableHead>
@@ -62,11 +66,22 @@ export function RelocationSummary({ lang, rows, target, zoneCount, ctx = DEFAULT
             {items.map(({ row, badge, from }) => (
               <TableRow key={row.code} data-move={badge} sx={badge === 'none' ? { opacity: 0.45 } : undefined}>
                 <TableCell>{row.code}</TableCell>
-                <TableCell>{row.name}</TableCell>
-                <TableCell>{from}</TableCell>
-                <TableCell>{describe(targetFac(target, ctx), to?.dbFloor, target.zone)}</TableCell>
+                <TableCell sx={{ maxWidth: 220 }}>
+                  <Tooltip title={row.name ?? ''}>
+                    <Typography variant="body2" noWrap>{row.name}</Typography>
+                  </Tooltip>
+                </TableCell>
+                {/* Wraps on narrow cards. */}
+                <TableCell sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }} data-testid={`summary-route-${row.code}`}>{`${from} → ${toText}`}</TableCell>
                 <TableCell>
-                  <Chip size="small" variant={badge === 'none' ? 'outlined' : 'filled'} color={BADGES[badge].color} label={vi ? BADGES[badge].vi : BADGES[badge].en} />
+                  <Chip
+                    size="small"
+                    variant={badge === 'none' ? 'outlined' : 'filled'}
+                    color={BADGES[badge].color}
+                    label={vi ? BADGES[badge].vi : BADGES[badge].en}
+                    data-testid={`summary-badge-${row.code}`}
+                    sx={BADGES[badge].cross ? { bgcolor: CROSS, color: '#ffffff' } : undefined}
+                  />
                 </TableCell>
               </TableRow>
             ))}

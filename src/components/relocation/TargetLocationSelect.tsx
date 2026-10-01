@@ -1,5 +1,5 @@
-import { Autocomplete, Box, MenuItem, Stack, TextField, Typography } from '@mui/material'
-import { useEffect, useMemo, useState } from 'react'
+import { alpha, Autocomplete, Box, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { LayoutId } from '../../data/mapData'
 import type { Lang } from '../../types/fixedAsset'
 import type { RelocationTarget } from '../../types/relocation'
@@ -8,6 +8,51 @@ import { facLabel } from '../../config/relocation'
 import { catalogFacs, catalogLayouts, catalogOptions, unplacedZones, type CatalogOption, type LocationCatalog } from '../../utils/locationCatalog'
 import { isMajorZone } from '../../utils/relocationInput'
 import type { RelocationLayout } from './RelocationFloorMap'
+
+/** Small rounded chip of a route line: light tint, or solid with white text. */
+export function RouteChip({ color, solid = false, children, testId }: { color: string; solid?: boolean; children: ReactNode; testId?: string }) {
+  return (
+    <Box
+      component="span"
+      data-testid={testId}
+      sx={{ px: 1, py: 0.25, borderRadius: '999px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: solid ? '#ffffff' : color, bgcolor: solid ? color : alpha(color, 0.14) }}
+    >
+      {children}
+    </Box>
+  )
+}
+
+export interface RouteBadge {
+  key: string
+  label: string
+  solid: boolean
+  color: string
+}
+
+export interface Route {
+  count: number
+  /** "Toà A / 1F / A2-3". */
+  dest: string
+  badges: readonly RouteBadge[]
+}
+
+/** "N máy → Toà A / 1F / A2-3" + move-type badges. Test ids: `${testId}-route`, `${testId}-badge-${key}`. */
+export function RouteLine({ lang, route, fromColor, toColor, testId }: { lang: Lang; route: Route; fromColor: string; toColor: string; testId: string }) {
+  const vi = lang === 'vi'
+  return (
+    <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }} data-testid={`${testId}-route`}>
+      <RouteChip color={fromColor}>{route.count} {vi ? 'máy' : route.count === 1 ? 'machine' : 'machines'}</RouteChip>
+      <Box component="span" aria-hidden sx={{ color: 'text.secondary' }}>→</Box>
+      <RouteChip color={toColor}>{route.dest}</RouteChip>
+      {route.badges.map((b) => (
+        <RouteChip key={b.key} color={b.color} solid={b.solid} testId={`${testId}-badge-${b.key}`}>{b.label}</RouteChip>
+      ))}
+    </Stack>
+  )
+}
+
+/** Floor option of a layout: "1F · Press". */
+export const floorLabel = (l: Pick<RelocationLayout, 'title' | 'dbFloor'>) => `${l.dbFloor ?? '-'} · ${l.title.split(' - ').pop() ?? l.title}`
 
 interface Props {
   lang: Lang
@@ -19,6 +64,10 @@ interface Props {
   catalog: LocationCatalog
   onLayoutChange: (id: LayoutId | null) => void
   onTargetChange: (target: RelocationTarget | null) => void
+  /** Route of the machines that move, shown under the fields (null = nothing moves yet). */
+  route?: Route | null
+  /** Route chip colours (the From / To state colours). */
+  routeColors?: { from: string; to: string }
 }
 
 export function countLabel(code: string, count: number, vi: boolean) {
@@ -31,7 +80,7 @@ export function countLabel(code: string, count: number, vi: boolean) {
  * pickable).
  * Controlled by `layoutId`/`target`, so a click on the After map updates it too.
  */
-export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, target, catalog, onLayoutChange, onTargetChange }: Props) {
+export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, target, catalog, onLayoutChange, onTargetChange, route, routeColors }: Props) {
   const vi = lang === 'vi'
   const buildings = useMemo(() => catalogFacs(catalog), [catalog])
   const unplaced = useMemo(() => unplacedZones(catalog), [catalog])
@@ -51,10 +100,12 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
   const value = (target && target.layoutId === layoutId && options.find((o) => o.code === target.zone)) || null
 
   return (
-    <Stack spacing={1}>
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={(theme) => ({ ...glassFilterControls(theme), '& > *': { flex: 1, minWidth: 0 } })}>
+    <Stack spacing={1.25}>
+      {/* Stacked, full width: fits the narrow column next to the machine picker. */}
+      <Stack spacing={1.5} sx={glassFilterControls}>
         <TextField
           select
+          fullWidth
           size="small"
           label={vi ? 'Toà nhà' : 'Building'}
           value={building}
@@ -68,8 +119,9 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
         </TextField>
         <TextField
           select
+          fullWidth
           size="small"
-          label={vi ? 'Tầng' : 'Floor'}
+          label={vi ? 'Tầng / Khu' : 'Floor / Area'}
           value={layout && floors.some((l) => l.id === layout.id) ? layout.id : ''}
           disabled={!building}
           onChange={(e) => {
@@ -77,9 +129,10 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
             onTargetChange(null)
           }}
         >
-          {floors.map((l) => <MenuItem key={l.id} value={l.id}>{l.title}</MenuItem>)}
+          {floors.map((l) => <MenuItem key={l.id} value={l.id}>{floorLabel(l)}</MenuItem>)}
         </TextField>
         <Autocomplete<CatalogOption>
+          fullWidth
           size="small"
           disabled={!layout || !building}
           options={options}
@@ -91,17 +144,22 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
           onChange={(_, next) => onTargetChange(next && layout ? { layoutId: layout.id, zone: next.code } : null)}
           renderOption={({ key, ...props }, o) => (
             <li key={key} {...props}>
-              <Box component="span" sx={{ flex: 1, fontWeight: isMajorZone(o.code) ? 600 : 400, pl: isMajorZone(o.code) ? 0 : 1.5 }}>{o.code}</Box>
-              <Typography variant="caption" color="text.secondary">
-                {o.disabled ? (vi ? 'có khu con' : 'has sub-zones') : countLabel(o.code, o.count, vi)}
-                {!o.drawn && ` · ${vi ? 'không có trên bản vẽ' : 'not on the drawing'}`}
-              </Typography>
+              {/* "A2-3 · 27 máy" */}
+              <Box component="span" sx={{ flex: 1, fontWeight: isMajorZone(o.code) ? 600 : 400, pl: isMajorZone(o.code) ? 0 : 1.5 }}>
+                {o.code} · {o.disabled ? (vi ? 'có khu con' : 'has sub-zones') : countLabel(o.code, o.count, vi)}
+              </Box>
+              {!o.drawn && (
+                <Typography variant="caption" color="text.secondary">
+                  {vi ? 'không có trên bản vẽ' : 'not on the drawing'}
+                </Typography>
+              )}
             </li>
           )}
           noOptionsText={vi ? 'Không có zone' : 'No zones'}
           renderInput={(params) => <TextField {...params} label="Zone" placeholder={vi ? 'Chọn zone đích' : 'Pick destination zone'} />}
         />
       </Stack>
+      {route && routeColors && <RouteLine lang={lang} route={route} fromColor={routeColors.from} toColor={routeColors.to} testId="target" />}
       {unplaced.length > 0 && (
         <Typography variant="caption" color="text.secondary" data-testid="unplaced-zones">
           {vi ? 'Zone chưa gắn với sơ đồ nào (không chọn được)' : 'Zones not tied to any layout (not selectable)'}: {unplaced.join(', ')}
