@@ -35,9 +35,10 @@ describe('checkCodes', () => {
     expect(checkCodes(['M1', 'M2'], { ...opts, isOutside: (row) => row === byCode.get('M2') })).toMatchObject({ accepted: ['M1'], outside: ['M2'] })
   })
 
-  it('blocks machines that are in a PENDING request', () => {
+  it('blocks machines that are in an open request', () => {
     const pending = pendingCodesOf([
-      { status: 'PENDING', items: [{ code: 'M1', name: '', fromZone: null, fromFloor: null, moveType: 'same' }] },
+      { status: 'REQ_PENDING_PE', items: [{ code: 'M1', name: '', fromZone: null, fromFloor: null, moveType: 'same' }] },
+      { status: 'REQ_DONE', items: [{ code: 'M2', name: '', fromZone: null, fromFloor: null, moveType: null }] },
     ])
     expect(checkCodes(['M1', 'M2'], { ...opts, pendingCodes: pending })).toMatchObject({ accepted: ['M2'], pending: ['M1'] })
   })

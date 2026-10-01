@@ -50,10 +50,10 @@ export function RelocationForm({ lang, value, onChange, moverCount, submitting =
             fullWidth
             type="date"
             label={vi ? 'Ngày dự kiến' : 'Planned date'}
-            value={value.dStart}
-            onChange={set('dStart')}
-            error={!!shown.dStart}
-            helperText={msg('dStart')}
+            value={value.plannedMoveDate}
+            onChange={set('plannedMoveDate')}
+            error={!!shown.plannedMoveDate}
+            helperText={msg('plannedMoveDate')}
             slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: today } }}
           />
           <TextField
@@ -62,11 +62,11 @@ export function RelocationForm({ lang, value, onChange, moverCount, submitting =
             fullWidth
             type="date"
             label={vi ? 'Ngày hoàn thành' : 'Completion date'}
-            value={value.dEnd}
-            onChange={set('dEnd')}
-            error={!!shown.dEnd}
-            helperText={msg('dEnd')}
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: value.dStart || today } }}
+            value={value.plannedDoneDate}
+            onChange={set('plannedDoneDate')}
+            error={!!shown.plannedDoneDate}
+            helperText={msg('plannedDoneDate')}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: value.plannedMoveDate || today } }}
           />
         </Box>
         {/* Row 2: reason (grows) + submit on the right; stacked with a full-width button on narrow screens. */}

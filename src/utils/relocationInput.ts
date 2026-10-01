@@ -1,6 +1,7 @@
+import { OPEN_RELOCATION_STATUSES } from '../config/relocation'
 import type { FixedAsset } from '../types/fixedAsset'
 import type { AssetLocation } from '../types/location'
-import type { MoveType, RelocationItem, RelocationRequest, RelocationTarget } from '../types/relocation'
+import type { MoveType, RelocationItem, RelocationRequest, RelocationStatus, RelocationTarget } from '../types/relocation'
 import { DEFAULT_CONTEXT, eligibleForRelocation, moveTypeOf, rowFac, targetFac, type RelocationContext, type RelocationRow } from './relocation'
 import { majorZone } from './zone'
 
@@ -47,9 +48,10 @@ export function checkCodes<R extends Pick<FixedAsset, 'kind'>>(
   return out
 }
 
-/** Codes of every item in a PENDING request. */
+/** Codes of every item of an open request (pending PE/BoD or approved); item status wins when the API gives one. */
 export function pendingCodesOf(requests: readonly Pick<RelocationRequest, 'status' | 'items'>[]): Set<string> {
-  return new Set(requests.filter((r) => r.status === 'PENDING').flatMap((r) => r.items.map((i) => i.code)))
+  const open = (s: RelocationStatus | null | undefined) => !!s && OPEN_RELOCATION_STATUSES.includes(s)
+  return new Set(requests.flatMap((r) => r.items.filter((i) => open(i.status ?? r.status)).map((i) => i.code)))
 }
 
 type Row = RelocationRow & Pick<AssetLocation, 'code' | 'name'>

@@ -25,8 +25,8 @@ export const tokens = {
     gridLine: 'rgba(15, 23, 42, 0.08)',
     shadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06)',
     // Relocation map (drawn on the white layout image): source, destination, destination on another layout, unrelated,
-    // old location. Contrast on white: from 5.2:1, to 5.5:1, cross 7.1:1 (also enough for white chip / pill text).
-    relocFrom: '#c2410c',
+    // old location. Contrast on white: from (amber) 3.1:1, to 5.5:1, cross 7.1:1.
+    relocFrom: '#b7791f',
     relocTo: '#047857',
     relocOld: '#64748b',
     relocCross: '#6d28d9',

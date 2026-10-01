@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLOORS, type LayoutId } from '../../data/mapData'
 import { DEFAULT_CONTEXT } from '../../utils/relocation'
 import { tokens, zonePalette } from '../../theme/palette'
-import { layoutLabels, measureTextWidth, RelocationFloorMap, resetTextMeasure, SLATE, type LabelBox } from './RelocationFloorMap'
+import { AMBER, FOCUS, layoutLabels, measureTextWidth, RelocationFloorMap, resetTextMeasure, SLATE, type LabelBox, type RelocationLayout } from './RelocationFloorMap'
 
 /** Buildings come from the API fac of each zone. */
 const ctx = { ...DEFAULT_CONTEXT, zoneFac: new Map([['A2', 'Fac_A'], ['A2-3', 'Fac_A'], ['A5', 'Fac_A'], ['A5-3', 'Fac_A'], ['A15-3', 'Fac_B']]) }
@@ -34,7 +34,8 @@ describe('RelocationFloorMap - before', () => {
     )
     expect(zone(container, 'A2-3').classList).toContain('zone-from')
     expect(zone(container, 'A1-1').classList).toContain('zone-dim')
-    expect(container.querySelector('.reloc-label[data-zone="A2-3"]')?.textContent).toBe('A2-3 · 2')
+    // The from zone chip is hidden: the pin caption (machine codes) takes its place.
+    expect(container.querySelector('.reloc-label[data-zone="A2-3"]')).toBeNull()
     expect(container.querySelector('.reloc-pin.pin-from[data-zone="A2-3"] .reloc-pin-label')?.textContent).toBe('A-006-1 +1')
     // Destination on another layout: purple pill on the right edge.
     expect(container.querySelector('.reloc-edge-to')?.textContent).toBe('Sang Toà B / 1F / A15-3 ▸')
@@ -257,7 +258,7 @@ describe('RelocationFloorMap - focus mode', () => {
     const to = container.querySelector('.reloc-label[data-zone="A3-1"]')!
     expect(to.classList).toContain('is-related')
     expect(to.textContent).toBe('A3-1 · 5')
-    expect(container.querySelector('.reloc-label[data-zone="A2-3"]')?.textContent).toBe('A2-3 · 2')
+    expect(container.querySelector('.reloc-label[data-zone="A2-3"]')).toBeNull() // Old zone: the pin caption replaces the chip.
     expect(zone(container, 'A3-1').getAttribute('vector-effect')).toBe('non-scaling-stroke')
   })
 
@@ -335,20 +336,45 @@ describe('RelocationFloorMap - label placement', () => {
     expect(caption.style.transform).toMatch(/^rotate\(-90deg\) translate\(-[\d.]+px, -[\d.]+px\)$/)
   })
 
-  it('focus mode: unrelated zones keep their colour, fill drops to 0.08; chips are not faded', () => {
+  it('focus mode: unrelated zones keep their major colour but go pale (fill 0.06, 1px stroke 0.45, chips 0.6 / 0.55)', () => {
     const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="before" rows={rows} target={null} />)
     const dim = zone(container, 'A1-1')
     const style = getComputedStyle(dim)
-    expect(Number(style.getPropertyValue('fill-opacity')) * 0.14).toBeCloseTo(0.08, 3)
+    expect(Number(style.getPropertyValue('fill-opacity')) * FOCUS.zoneFill).toBeCloseTo(0.06, 3)
+    expect(style.getPropertyValue('stroke-width')).toBe('1')
+    expect(style.getPropertyValue('stroke-opacity')).toBe('0.45')
     expect(dim.getAttribute('stroke')).toBe(zone(container, 'A1').getAttribute('stroke'))
+    expect(dim.getAttribute('stroke')).not.toBe(SLATE)
     expect(['', 'none']).toContain(style.getPropertyValue('stroke-dasharray'))
     const chip = container.querySelector<HTMLElement>('.reloc-label[data-zone="A1-1"]')!
-    expect(['', '1']).toContain(getComputedStyle(chip).opacity)
-    // Major areas around related zones get a bolder stroke.
-    expect(getComputedStyle(zone(container, 'A2')).getPropertyValue('stroke-width')).toBe('3')
+    expect(getComputedStyle(chip).opacity).toBe('0.6')
+    // The chip text keeps the major colour (not grey).
+    expect(chip.querySelector<HTMLElement>('.reloc-label-text')!.style.color).not.toBe('')
+    expect(getComputedStyle(container.querySelector('.reloc-label[data-zone="A1"]')!).opacity).toBe('0.55')
   })
 
-  it('dashed strokes: disabled zones (grey) and old zones (orange) only', () => {
+  it('focus mode: the major area holding a related zone is solid (2px, opacity 1, solid label); its other sub-zones stay pale', () => {
+    const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="before" rows={rows} target={null} />)
+    const a2 = getComputedStyle(zone(container, 'A2'))
+    expect(a2.getPropertyValue('stroke-width')).toBe('2')
+    expect(a2.getPropertyValue('stroke-opacity')).toBe('1')
+    const label = container.querySelector<HTMLElement>('.reloc-label[data-zone="A2"]')!
+    expect(label.classList).not.toContain('is-muted')
+    expect(['', '1']).toContain(getComputedStyle(label).opacity)
+    expect(label.querySelector<HTMLElement>('.reloc-label-text')!.style.backgroundColor).not.toBe('')
+    expect(zone(container, 'A2-1').classList).toContain('zone-dim')
+    expect(getComputedStyle(container.querySelector('.reloc-label[data-zone="A2-1"]')!).opacity).toBe('0.6')
+  })
+
+  it('focus mode: hovering a pale zone on the After map brings its chip back to opacity 1', () => {
+    const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={rows} target={null} onPickZone={() => {}} />)
+    fireEvent.mouseEnter(zone(container, 'A1-1'))
+    expect(getComputedStyle(container.querySelector('.reloc-label[data-zone="A1-1"]')!).opacity).toBe('1')
+    fireEvent.mouseLeave(zone(container, 'A1-1'))
+    expect(getComputedStyle(container.querySelector('.reloc-label[data-zone="A1-1"]')!).opacity).toBe('0.6')
+  })
+
+  it('dashed strokes: disabled zones (grey) and old zones (amber) only', () => {
     const { container } = render(
       <RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={rows} target={{ layoutId: 'floor1', zone: 'A3-1' }} onPickZone={() => {}} isPickable={(c) => c !== 'A1-1'} />,
     )
@@ -424,29 +450,53 @@ describe('RelocationFloorMap - state colours', () => {
   const is = (hex: string) => (v: string) => [hex.toLowerCase(), rgbOf(hex)].includes(v.trim().toLowerCase())
   const target = { layoutId: 'floor1' as const, zone: 'A3-1' }
 
-  it('from: orange #c2410c, 3px; pin = white dot with orange border', () => {
-    expect(FROM).toBe('#c2410c')
+  it('from: amber #b7791f fill, #92400e 2.5px stroke; pin = white dot with amber border, solid amber caption', () => {
+    expect(FROM).toBe('#b7791f')
     const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="before" rows={rows} target={null} />)
     const style = getComputedStyle(zone(container, 'A2-3'))
-    expect(is(FROM)(style.getPropertyValue('stroke'))).toBe(true)
-    expect(style.getPropertyValue('stroke-width')).toBe('3')
+    expect(is('#92400e')(style.getPropertyValue('stroke'))).toBe(true)
+    expect(style.getPropertyValue('stroke-width')).toBe('2.5')
     const dot = getComputedStyle(container.querySelector('.pin-from .reloc-pin-dot')!)
     expect(is('#ffffff')(dot.backgroundColor)).toBe(true)
+    expect(is(FROM)(dot.borderColor)).toBe(true)
+    expect(is(FROM)(getComputedStyle(container.querySelector('.pin-from .reloc-pin-label')!).backgroundColor)).toBe(true)
   })
 
-  it('to: green #047857, 3px; old: orange dashed 2px, no animation; same-layout arrow green', () => {
+  it('old zone uses the amber token: pale amber fill, amber dashed stroke, pale chip with dark ink, hollow pin; no zone chip', () => {
+    expect(FOCUS.old.color).toBe(AMBER.base)
+    expect(FOCUS.from.color).toBe(AMBER.base)
+    expect(FOCUS.old.stroke).toBe(AMBER.base)
+    expect(FOCUS.from.stroke).toBe(AMBER.ink)
+    expect(AMBER).toEqual({ base: '#b7791f', ink: '#92400e', paper: '#fef3c7' })
+    expect(FOCUS.old.fill).toBe(0.25)
+    const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={rows} target={target} onPickZone={() => {}} />)
+    const old = getComputedStyle(zone(container, 'A2-3'))
+    expect(old.getPropertyValue('fill').replace(/\s/g, '')).toMatch(/^rgba\(183,121,31,0\.25\)$/)
+    expect(container.querySelector('.reloc-label[data-zone="A2-3"]')).toBeNull()
+    const chip = getComputedStyle(container.querySelector('.pin-old[data-zone="A2-3"] .reloc-pin-label')!)
+    expect(is(AMBER.paper)(chip.backgroundColor)).toBe(true)
+    expect(is(AMBER.ink)(chip.color)).toBe(true)
+    expect(is(AMBER.ink)(chip.borderColor)).toBe(true)
+    const dot = getComputedStyle(container.querySelector('.pin-old .reloc-pin-dot')!)
+    expect(is('#ffffff')(dot.backgroundColor)).toBe(true)
+    expect(is(AMBER.base)(dot.borderColor)).toBe(true)
+    expect(dot.borderWidth).toBe('2.5px')
+  })
+
+  it('to: green fill, #065f46 2.5px; old: amber dashed 2px, no animation; same-layout arrow green, dashed', () => {
     const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={rows} target={target} onPickZone={() => {}} />)
     const to = getComputedStyle(zone(container, 'A3-1'))
-    expect(is(TO)(to.getPropertyValue('stroke'))).toBe(true)
-    expect(to.getPropertyValue('stroke-width')).toBe('3')
+    expect(is('#065f46')(to.getPropertyValue('stroke'))).toBe(true)
+    expect(to.getPropertyValue('stroke-width')).toBe('2.5')
     const old = getComputedStyle(zone(container, 'A2-3'))
     expect(is(FROM)(old.getPropertyValue('stroke'))).toBe(true)
     expect(old.getPropertyValue('stroke-width')).toBe('2')
-    expect(['', 'none']).not.toContain(old.getPropertyValue('stroke-dasharray'))
+    expect(old.getPropertyValue('stroke-dasharray').replace(/px/g, '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim()).toBe('6 4')
     expect(['', 'none']).toContain(old.getPropertyValue('animation-name'))
     const arrow = container.querySelector('.reloc-arrow')!
     expect(arrow.classList).not.toContain('is-cross')
     expect(is(TO)(getComputedStyle(arrow).getPropertyValue('stroke'))).toBe(true)
+    expect(getComputedStyle(arrow).getPropertyValue('stroke-width')).toBe('2.5')
     expect(container.querySelector('linearGradient')).toBeNull()
   })
 
@@ -460,6 +510,63 @@ describe('RelocationFloorMap - state colours', () => {
     const img = getComputedStyle(container.querySelector('.map-scene > img')!)
     expect(img.filter).toBe('grayscale(1)')
     expect(img.opacity).toBe('0.6')
+  })
+
+  it('focus mode fades the drawing further (opacity 0.5)', () => {
+    const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={rows} target={null} onPickZone={() => {}} />)
+    const img = getComputedStyle(container.querySelector('.map-scene > img')!)
+    expect(img.filter).toBe('grayscale(1)')
+    expect(img.opacity).toBe('0.5')
+  })
+})
+
+describe('RelocationFloorMap - old zones', () => {
+  // Three narrow neighbouring sub-zones: their "(cũ)" captions would overlap above the pins.
+  const rect = (code: string, x: number, y: number, w: number, h: number) => ({
+    code,
+    points: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }],
+  })
+  const tight = {
+    id: 'floor1',
+    title: 'Test - T1',
+    imageData: '',
+    imgW: 400,
+    imgH: 300,
+    dbFloor: '1F',
+    zones: [],
+    areas: [rect('B1', 0, 0, 100, 100)],
+    subAreas: [rect('B1-1', 40, 20, 6, 40), rect('B1-2', 47, 20, 6, 40), rect('B1-3', 54, 20, 6, 40), rect('B1-9', 40, 80, 20, 10)],
+  } as unknown as RelocationLayout
+  const tightCtx = { layouts: [tight], index: new Map([['B1', 'floor1'], ['B1-1', 'floor1'], ['B1-2', 'floor1'], ['B1-3', 'floor1'], ['B1-9', 'floor1']] as const), zoneFac: new Map<string, string>() }
+  const olds = [row('X-1', 'B1-1'), row('X-2', 'B1-2'), row('X-3', 'B1-3')]
+  const renderTight = () =>
+    render(<RelocationFloorMap lang="vi" layout={tight} layouts={[tight]} role="after" rows={olds} target={{ layoutId: 'floor1', zone: 'B1-9' }} onPickZone={() => {}} ctx={tightCtx} />)
+
+  it('one arrow per old zone, all ending at the destination', () => {
+    const { container } = renderTight()
+    const groups = [...container.querySelectorAll('.reloc-arrow-group')]
+    expect(groups.map((g) => g.getAttribute('data-from')).sort()).toEqual(['B1-1', 'B1-2', 'B1-3'])
+    const ends = groups.map((g) => g.querySelector('.reloc-arrow-head')!.getAttribute('points')!.split(' ')[0].split(',').map(Number))
+    // The arrowhead tips stop just before the centre of B1-9 (50%, 85%).
+    for (const [x, y] of ends) expect(Math.hypot(((x - 50) * 400) / 100, ((y - 85) * 300) / 100)).toBeLessThan(12)
+  })
+
+  it('"(cũ)" captions never overlap each other', () => {
+    const { container } = renderTight()
+    const boxes = [...container.querySelectorAll<HTMLElement>('.reloc-pin.pin-old')].map((pin) => {
+      const label = pin.querySelector<HTMLElement>('.reloc-pin-label')!
+      const [, dx, dy] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(label.style.transform)!.map(Number)
+      const x = (parseFloat(pin.style.left) / 100) * 400 + dx
+      const y = (parseFloat(pin.style.top) / 100) * 300 + dy
+      return { x, y, w: Math.ceil(label.textContent!.length * 7 + 14), h: 18 }
+    })
+    expect(boxes).toHaveLength(3)
+    // Where they were asked (same y, 28px apart) they overlap; after layout no pair does.
+    for (let i = 0; i < boxes.length; i++)
+      for (let j = i + 1; j < boxes.length; j++) {
+        const [a, b] = [boxes[i], boxes[j]]
+        expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false)
+      }
   })
 })
 
@@ -476,7 +583,7 @@ describe('RelocationFloorMap - tray chips', () => {
     expect(style.borderWidth).toBe('1px')
     expect(['', '1']).toContain(style.opacity)
     expect(chip.textContent).toBe('A2-94')
-    // Old tray zone (A5-3): orange, "(cũ)" instead of the count.
+    // Old tray zone (A5-3): amber, "(cũ)" instead of the count.
     const old = container.querySelector<HTMLElement>('.reloc-tray-zone[data-zone="A5-3"]')!
     expect(old.getAttribute('data-border')).toBe(tokens.light.relocFrom)
     expect(old.textContent).toBe('A5-3(cũ)')

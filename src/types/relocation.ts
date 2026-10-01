@@ -14,16 +14,33 @@ export interface RelocationItem {
   /** Snapshot of the asset's location when the request was created. */
   fromZone: string | null
   fromFloor: string | null
-  moveType: MoveType
+  /** Null for requests read back from the API (not stored there). */
+  moveType: MoveType | null
+  /** Per-machine status from the API (rows of one request can diverge later). */
+  status?: RelocationStatus
+  /** Snapshot of the request row (API): major zone left (PositionA_BF) and destination zone (PositionA(A)_AT). */
+  fromPositionA?: string | null
+  toZone?: string | null
 }
 
+/** F2_FIXED_ASSET_HISTORY.Status of relocation rows (always REQ_*). */
+export type RelocationStatus = 'REQ_PENDING_PE' | 'REQ_PENDING_BOD' | 'REQ_APPROVED' | 'REQ_REJECTED' | 'REQ_DONE'
+
+
 export interface RelocationRequest {
+  /** RequestNo (RL-yyyy-nnnn). */
   id: string
   items: RelocationItem[]
-  to: RelocationTarget
+  /** layoutId is null when the zone is not drawn on any layout. */
+  to: { layoutId: LayoutId | null; zone: string }
   requestedBy: string
-  dStart: string
-  dEnd: string
+  plannedMoveDate: string
+  plannedDoneDate: string
   reason: string
-  status: 'PENDING'
+  /** Null when the rows of the request disagree (API). */
+  status: RelocationStatus | null
+  /** API CreateDate ("yyyy-MM-ddTHH:mm:ss"); absent right after creation. */
+  createdAt?: string | null
+  /** Stored drawing: its webUrl, or only its file name when the server has no web address; null = none uploaded. */
+  drawingUrl?: string | null
 }

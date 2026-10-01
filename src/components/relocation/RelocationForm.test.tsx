@@ -24,7 +24,7 @@ describe('RelocationForm', () => {
   it('rejects a past planned date and a completion date before it; submits once valid', () => {
     const onSubmit = vi.fn()
     const today = todayIso()
-    render(<Harness onSubmit={onSubmit} initial={{ requestedBy: 'E001', dStart: '2000-01-02', dEnd: '2000-01-01', reason: 'Re-layout' }} />)
+    render(<Harness onSubmit={onSubmit} initial={{ requestedBy: 'E001', plannedMoveDate: '2000-01-02', plannedDoneDate: '2000-01-01', reason: 'Re-layout' }} />)
     fireEvent.click(screen.getByRole('button', { name: 'Gửi yêu cầu (2 máy)' }))
     expect(screen.getByText('Không được chọn ngày trong quá khứ')).toBeTruthy()
     expect(screen.getByText('Phải từ ngày dự kiến trở đi')).toBeTruthy()
@@ -33,7 +33,25 @@ describe('RelocationForm', () => {
     fireEvent.change(screen.getByLabelText(/Ngày dự kiến/), { target: { value: today } })
     fireEvent.change(screen.getByLabelText(/Ngày hoàn thành/), { target: { value: today } })
     fireEvent.click(screen.getByRole('button', { name: 'Gửi yêu cầu (2 máy)' }))
-    expect(onSubmit).toHaveBeenCalledWith({ requestedBy: 'E001', dStart: today, dEnd: today, reason: 'Re-layout' })
+    expect(onSubmit).toHaveBeenCalledWith({ requestedBy: 'E001', plannedMoveDate: today, plannedDoneDate: today, reason: 'Re-layout' })
+  })
+
+  it('date inputs: min = today (local) for the planned date, min = planned date for completion', () => {
+    const today = todayIso()
+    render(<Harness onSubmit={() => {}} />)
+    const planned = screen.getByLabelText(/Ngày dự kiến/) as HTMLInputElement
+    const done = screen.getByLabelText(/Ngày hoàn thành/) as HTMLInputElement
+    expect(planned.type).toBe('date')
+    expect(planned.required && done.required).toBe(true)
+    expect(planned.min).toBe(today)
+    expect(done.min).toBe(today)
+    fireEvent.change(planned, { target: { value: '2099-05-10' } })
+    expect(done.min).toBe('2099-05-10')
+  })
+
+  it('todayIso uses the local date, not UTC', () => {
+    expect(todayIso(new Date(2026, 9, 1, 0, 30))).toBe('2026-10-01')
+    expect(todayIso(new Date(2026, 11, 31, 23, 59))).toBe('2026-12-31')
   })
 
   it('English labels', () => {

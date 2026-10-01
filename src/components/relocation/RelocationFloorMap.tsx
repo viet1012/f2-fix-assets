@@ -65,17 +65,47 @@ interface Props {
   /** All layouts, used to describe a destination/source on another layout. */
   layouts?: readonly RelocationLayout[]
   ctx?: RelocationContext
+  /**
+   * Export mode (PNG of a request): a standalone <svg> of fixed scene width, without zoom toolbar, tray or
+   * interaction; every style is inline and the drawing is the given (data URL) image, so it can be serialized.
+   */
+  exportMode?: { width: number; imageHref: string }
 }
 
+/** Font stack of the exported SVG (system fonts with Vietnamese glyphs as fallback). */
+export const EXPORT_FONT = 'Inter, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif'
+
 const MAP = tokens.light // The layout image is always white, in both theme modes.
-const FROM = MAP.relocFrom
-const TO = MAP.relocTo
+/** Amber shared by from (Before) and old (After): base colour, dark ink / stroke, pale chip background. */
+export const AMBER = { base: MAP.relocFrom, ink: '#92400e', paper: '#fef3c7' } as const
+/**
+ * Look of the maps. Focus mode (at least one machine selected, both maps): the drawing fades, unrelated zones keep
+ * their major-area colour but go pale (still clickable on the After map, full opacity on hover), major areas holding a
+ * related zone stay solid, and from / old / to stand out in amber / white / green.
+ */
+export const FOCUS = {
+  /** Layout image opacity (always grayscale): no machine selected / focus mode. */
+  image: { idle: 0.6, focus: 0.5 },
+  /** Normal zone fill; majors with sub-zones stay lighter so their sub-zones do not get a double tint. */
+  zoneFill: 0.14,
+  majorFill: 0.05,
+  dim: { fill: 0.06, strokeWidth: 1, strokeOpacity: 0.45, chipOpacity: 0.6, majorChipOpacity: 0.55 },
+  parent: { strokeWidth: 2 },
+  from: { color: AMBER.base, fill: 0.6, stroke: AMBER.ink, strokeWidth: 2.5, pinBorder: 3 },
+  /** Old zone: pale amber fill, dashed amber stroke; chip "A-341 (cũ)" pale amber with dark ink; hollow pin. */
+  old: { color: AMBER.base, fill: 0.25, stroke: AMBER.base, strokeWidth: 2, dash: '6 4', chipBg: AMBER.paper, chipInk: AMBER.ink, pinBorder: 2.5 },
+  to: { color: MAP.relocTo, fill: 0.75, stroke: '#065f46', strokeWidth: 2.5 },
+  arrow: { strokeWidth: 2.5, dash: '8 6' },
+  /** Tries per pin caption to get out of an overlap ("(cũ)" chips: up/down, left, right). */
+  labelTries: 4,
+  transitionMs: 200,
+} as const
+const FROM = FOCUS.from.color
+const TO = FOCUS.to.color
 const CROSS = MAP.relocCross
 /** Major areas without sub-zones (A7-A11...): neutral slate stroke and chip. */
 export const SLATE = '#64748b'
-/** Zone fill opacity, and the lower one of unrelated zones in focus mode. */
-const ZONE_FILL = 0.14
-const DIM_FILL = 0.08
+const TRANSITION = ['opacity', 'fill', 'fill-opacity', 'stroke', 'stroke-opacity', 'stroke-width'].map((p) => `${p} ${FOCUS.transitionMs}ms`).join(', ')
 /** Distance (px) between a pin dot and its caption above; inset of edge pills from the map edge. */
 const PIN_GAP = 9
 const EDGE_INSET = 8
@@ -144,6 +174,8 @@ export interface LabelBox {
   zoneTop?: number
   /** Push direction on overlap: 1 = down, -1 = up. Default: pins down, majors up. */
   dir?: 1 | -1
+  /** Pin caption that may also move sideways: tries `dir`, left, right, then the opposite of `dir`. */
+  spread?: boolean
 }
 
 export interface PlacedLabel {
@@ -162,8 +194,9 @@ const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: num
 /**
  * Places label boxes (on-screen px) inside `bounds` without overlaps, by bbox collision. Tabs are placed first and
  * never move (flipped inside their zone when above the image edge); pin captions are pushed down (or up, `dir: -1`),
- * major labels pushed up, at most `maxTries` times each (leaving the image counts as a collision). A major label that is still
- * blocked is hidden; a pin caption keeps its last position.
+ * major labels pushed up, at most `maxTries` times each (leaving the image counts as a collision). `spread` captions
+ * also try left / right. A major label that is still blocked is hidden; a pin caption keeps its last position (a
+ * `spread` one goes back to where it was asked).
  */
 export function layoutLabels(boxes: readonly LabelBox[], bounds: { w: number; h: number }, gap = 2, maxTries = 3): Map<string, PlacedLabel> {
   const out = new Map<string, PlacedLabel>()
@@ -181,17 +214,26 @@ export function layoutLabels(boxes: readonly LabelBox[], bounds: { w: number; h:
     }
     const dir = b.dir ?? (b.kind === 'pin' ? 1 : -1)
     // Leaving the image counts as a collision too.
-    const blocked = (y: number) => y < 0 || y + b.h > bounds.h || placed.some((o) => overlaps({ x, y, w: b.w, h: b.h }, o))
-    let shifts = 0
-    let y = b.y
-    while (blocked(y) && shifts < maxTries) {
-      shifts += 1
-      y = b.y + dir * shifts * (b.h + gap)
+    const blocked = (p: { x: number; y: number }) =>
+      p.x < 0 || p.x + b.w > bounds.w || p.y < 0 || p.y + b.h > bounds.h || placed.some((o) => overlaps({ ...p, w: b.w, h: b.h }, o))
+    const moves = [[0, dir], [-1, 0], [1, 0], [0, -dir]] as const
+    const tryAt = (k: number) => {
+      if (!b.spread) return { x, y: b.y + dir * k * (b.h + gap) }
+      const [mx, my] = moves[(k - 1) % moves.length]
+      const n = Math.ceil(k / moves.length)
+      return { x: x + mx * n * (b.w + gap), y: b.y + my * n * (b.h + gap) }
     }
-    const clash = blocked(y)
+    let shifts = 0
+    let pos = { x, y: b.y }
+    while (blocked(pos) && shifts < maxTries) {
+      shifts += 1
+      pos = tryAt(shifts)
+    }
+    const clash = blocked(pos)
+    if (clash && b.spread) pos = { x, y: b.y }
     const hidden = b.kind === 'major' && clash
-    if (!hidden) placed.push({ x, y, w: b.w, h: b.h })
-    out.set(b.id, { x, y, flipped: false, shifts, hidden })
+    if (!hidden) placed.push({ ...pos, w: b.w, h: b.h })
+    out.set(b.id, { ...pos, flipped: false, shifts, hidden })
   }
   return out
 }
@@ -370,13 +412,17 @@ export function RelocationFloorMap({
   frameRatio = '16 / 10',
   layouts = FLOORS,
   ctx = DEFAULT_CONTEXT,
+  exportMode,
 }: Props) {
   const vi = lang === 'vi'
   const theme = useTheme()
   const upright = uprightTransform(layout.rotationDeg)
   const interactive = role === 'after' ? onPickZone !== undefined : onOpenZone !== undefined
   const { shapes, centers, majorsWithSubs, colorOf } = useLayoutGeometry(layout)
-  const [sceneW, setSceneW] = useState(0)
+  const [measuredW, setSceneW] = useState(0)
+  const sceneW = exportMode?.width ?? measuredW
+  /** Pickable zone under the pointer: its faded chip goes back to full opacity. */
+  const [hovered, setHovered] = useState<string | null>(null)
 
   const groups = useMemo(() => groupByLayoutZone(rows, ctx), [rows, ctx])
   const here = groups.get(layout.id) ?? new Map<string, Row[]>()
@@ -431,6 +477,8 @@ export function RelocationFloorMap({
     'aria-label': ariaLabel(code, state),
     'aria-pressed': pressed(code, state),
     onClick: () => pick(code),
+    onMouseEnter: () => setHovered(code),
+    onMouseLeave: () => setHovered((h) => (h === code ? null : h)),
     onKeyDown: (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
@@ -476,7 +524,7 @@ export function RelocationFloorMap({
     : []
 
   // On-screen px layout (a nominal width until the scene is measured, e.g. in tests).
-  const fontFamily = String(theme.typography.fontFamily)
+  const fontFamily = exportMode ? EXPORT_FONT : String(theme.typography.fontFamily)
   const W = sceneW || layout.imgW
   const H = (W * layout.imgH) / layout.imgW
   const vis = visualMapper(W, H, sceneRotation(layout.rotationDeg))
@@ -510,12 +558,15 @@ export function RelocationFloorMap({
     const w = (s.box.w * W) / 100
     const h = (s.box.h * H) / 100
     const isRel = related.has(s.code)
+    const state = states.get(s.code)!
+    // From / old zones carry a pin with the machine codes; their own chip would sit under it.
+    if (state === 'from' || state === 'old') return []
     if (sceneW > 0 && !s.major && !isRel && (w < MIN_LABEL_W || h < MIN_LABEL_H)) return []
     const muted = focus && !isRel && !parents.has(s.code)
     const fontSize = sceneW > 0 ? Math.round(Math.min(s.major ? 14 : 13, Math.max(9, Math.min(w, h) * 0.2))) : 11
     const n = counts.get(s.code) ?? 0
     const text = s.major ? s.code : showCounts && !muted ? `${s.code} · ${n}` : s.code
-    return [{ ...s, fontSize, fontWeight: s.major ? 800 : 700, related: isRel, muted, text, state: states.get(s.code)! }]
+    return [{ ...s, fontSize, fontWeight: s.major ? 800 : 700, related: isRel, muted, text, state }]
   })
   // Collision layout: related sub-zone chips and edge pills stay put; pin captions (above the dot) move up, the
   // labels of major areas around related zones move up or hide, so nothing covers the chips.
@@ -530,15 +581,40 @@ export function RelocationFloorMap({
   for (const p of pins) {
     const size = chipSize(p.label, 11, 800, fontFamily, PIN_PAD_X, 14, 4)
     const c = vis.map(centers.get(p.code)!)
-    boxes.push({ id: `pin:${p.code}`, kind: 'pin', dir: -1, x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h, ...size })
+    boxes.push({ id: `pin:${p.code}`, kind: 'pin', dir: -1, spread: p.kind === 'old', x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h, ...size })
   }
-  const placedLabels = layoutLabels(boxes, vis.bounds)
+  const placedLabels = layoutLabels(boxes, vis.bounds, 2, FOCUS.labelTries)
   /** Transform putting a label anchored at scene point `at` to its placed on-screen position. */
   const placedTransform = (id: string, at: { x: number; y: number }) => {
     const pl = placedLabels.get(id)
     if (!pl) return undefined
     const a = vis.map(at)
     return { hidden: pl.hidden, transform: `${upright} translate(${(pl.x - a.x).toFixed(1)}px, ${(pl.y - a.y).toFixed(1)}px)`.trim() }
+  }
+
+  if (exportMode) {
+    return (
+      <ExportSvg
+        exportMode={exportMode}
+        layout={layout}
+        vis={vis}
+        W={W}
+        H={H}
+        focus={focus}
+        layers={layers}
+        states={states}
+        related={related}
+        parents={parents}
+        hasSubs={hasSubs}
+        arrows={arrows}
+        labels={labels}
+        pins={pins}
+        centers={centers}
+        crossPills={crossPills}
+        toOtherText={toOtherText}
+        placedLabels={placedLabels}
+      />
+    )
   }
 
   const paper = 'rgba(255,255,255,.92)' // Chips sit on the always-light drawing, in both theme modes.
@@ -560,27 +636,34 @@ export function RelocationFloorMap({
           onSceneWidth={setSceneW}
           svgProps={{ className: 'reloc-svg', ...(interactive ? { role: 'group', 'aria-label': layout.title } : { 'aria-hidden': true, focusable: 'false' }) }}
           sceneSx={{
-            // The drawing recedes (grey, lighter) so the coloured zones carry the information. Static, no animation.
-            '& > img': { filter: 'grayscale(1)', opacity: 0.6 },
+            // The drawing recedes (grey, lighter; more in focus mode) so the coloured zones carry the information.
+            '& > img': { filter: 'grayscale(1)', opacity: focus ? FOCUS.image.focus : FOCUS.image.idle, transition: `opacity ${FOCUS.transitionMs}ms` },
             '& .reloc-svg': { pointerEvents: 'none' },
             '& .reloc-zone': {
               strokeLinejoin: 'round',
               vectorEffect: 'non-scaling-stroke',
-              transition: 'fill .15s, stroke .15s, stroke-width .15s, opacity .15s',
+              transition: TRANSITION,
               outline: 'none',
             },
             '& .reloc-zone.is-major': { strokeWidth: 2 },
             '& .reloc-zone.is-sub': { strokeWidth: 1.5 },
             '& .reloc-zone.is-pickable': { pointerEvents: 'visiblePainted', cursor: 'pointer' },
-            '& .reloc-zone.is-pickable:hover': { strokeWidth: 3, opacity: 1 },
+            '& .reloc-zone.is-pickable:hover': { strokeWidth: 3, opacity: 1, strokeOpacity: 1, fillOpacity: 1 },
             '& .reloc-zone:focus-visible': { stroke: theme.palette.primary.main, strokeWidth: 3.4, opacity: 1 },
-            // Focus mode: unrelated zones keep their colour, the fill drops from 0.14 to 0.08.
-            '& .reloc-zone.zone-dim': { fillOpacity: DIM_FILL / ZONE_FILL },
+            // Focus mode: unrelated zones keep their colour but go pale (fill 0.06, thin faded stroke); major areas
+            // holding a related zone get a solid 2px stroke.
+            '& .reloc-zone.zone-dim': { fillOpacity: FOCUS.dim.fill / FOCUS.zoneFill, strokeWidth: FOCUS.dim.strokeWidth, strokeOpacity: FOCUS.dim.strokeOpacity },
             '& .reloc-zone.zone-disabled': { fill: alpha(MAP.relocDim, 0.06), stroke: MAP.relocDim, strokeDasharray: '4 3' },
-            '& .reloc-zone.is-parent': { strokeWidth: 3, fillOpacity: 1 },
-            '& .reloc-zone.zone-from': { fill: alpha(FROM, 0.55), stroke: FROM, strokeWidth: 3 },
-            '& .reloc-zone.zone-to': { fill: alpha(TO, 0.6), stroke: TO, strokeWidth: 3 },
-            '& .reloc-zone.zone-old': { fill: alpha(FROM, 0.08), stroke: FROM, strokeWidth: 2, strokeDasharray: '6 4', animation: 'none' },
+            '& .reloc-zone.is-parent': { strokeWidth: FOCUS.parent.strokeWidth, strokeOpacity: 1, fillOpacity: 1 },
+            '& .reloc-zone.zone-from': { fill: alpha(FROM, FOCUS.from.fill), stroke: FOCUS.from.stroke, strokeWidth: FOCUS.from.strokeWidth },
+            '& .reloc-zone.zone-to': { fill: alpha(TO, FOCUS.to.fill), stroke: FOCUS.to.stroke, strokeWidth: FOCUS.to.strokeWidth },
+            '& .reloc-zone.zone-old': {
+              fill: alpha(FOCUS.old.color, FOCUS.old.fill),
+              stroke: FOCUS.old.stroke,
+              strokeWidth: FOCUS.old.strokeWidth,
+              strokeDasharray: FOCUS.old.dash,
+              animation: 'none',
+            },
             '& .reloc-zone.zone-from, & .reloc-zone.zone-to': { animation: 'reloc-breathe 2s ease-in-out infinite' },
             '& .reloc-halo': { fill: 'none', stroke: '#ffffff', strokeWidth: 6, strokeLinejoin: 'round', pointerEvents: 'none' },
             '& .reloc-zone.is-highlight': { stroke: theme.palette.primary.main, strokeWidth: 4, opacity: 1, animation: 'reloc-flash .7s ease-in-out infinite alternate' },
@@ -589,27 +672,31 @@ export function RelocationFloorMap({
             '& .reloc-arrow': {
               fill: 'none',
               stroke: TO,
-              strokeWidth: 2.4,
+              strokeWidth: FOCUS.arrow.strokeWidth,
               strokeLinecap: 'round',
               vectorEffect: 'non-scaling-stroke',
-              strokeDasharray: '7 5',
+              strokeDasharray: FOCUS.arrow.dash,
               animation: 'reloc-flow 1s linear infinite',
             },
             '& .reloc-arrow-head': { fill: TO },
             '& .reloc-arrow.is-cross': { stroke: CROSS },
             '& .reloc-arrow-head.is-cross': { fill: CROSS },
-            '@keyframes reloc-flow': { to: { strokeDashoffset: -12 } },
+            '@keyframes reloc-flow': { to: { strokeDashoffset: -14 } },
             '@keyframes reloc-pulse': { '0%': { transform: 'translate(-50%, -50%) scale(1)', opacity: 0.55 }, '100%': { transform: 'translate(-50%, -50%) scale(2.6)', opacity: 0 } },
             // Anchors: zero-size points in scene %, moving with the (rotated) scene; their content is counter-rotated.
             '& .reloc-pin, & .reloc-label, & .reloc-anchor': { position: 'absolute', width: 0, height: 0, pointerEvents: 'none' },
-            '& .reloc-label': { zIndex: 1 },
+            '& .reloc-label': { zIndex: 1, transition: `opacity ${FOCUS.transitionMs}ms` },
+            // Focus mode: unrelated chips fade (back to full opacity while their zone is hovered).
+            '& .reloc-label.is-muted': { opacity: FOCUS.dim.chipOpacity },
+            '& .reloc-label.is-major.is-muted': { opacity: FOCUS.dim.majorChipOpacity },
+            '& .reloc-label.is-muted.is-hover, & .reloc-label.is-major.is-muted.is-hover': { opacity: 1 },
             '& .reloc-label.is-related': { zIndex: 2 },
             '& .reloc-pin, & .reloc-anchor': { zIndex: 3 },
             '& .reloc-pin-dot, & .reloc-pin-ring': { position: 'absolute', left: 0, top: 0, width: 12, height: 12, borderRadius: '50%', transform: 'translate(-50%, -50%)' },
             // Pin: white dot with a border in the state colour.
-            '& .reloc-pin-dot': { bgcolor: '#ffffff', border: '3px solid', boxShadow: '0 1px 3px rgba(15,23,42,.35)' },
+            '& .reloc-pin-dot': { bgcolor: '#ffffff', border: `${FOCUS.from.pinBorder}px solid`, boxShadow: '0 1px 3px rgba(15,23,42,.35)' },
             '& .pin-from .reloc-pin-dot, & .pin-old .reloc-pin-dot': { borderColor: FROM },
-            '& .pin-old .reloc-pin-dot': { borderStyle: 'dashed', borderWidth: '2px' },
+            '& .pin-old .reloc-pin-dot': { borderWidth: `${FOCUS.old.pinBorder}px` },
             '& .pin-to .reloc-pin-dot': { borderColor: TO },
             '& .reloc-pin-ring': { bgcolor: TO, animation: 'reloc-pulse 1.6s ease-out infinite' },
             '& .reloc-pin-label, & .reloc-label-text, & .reloc-anchor-text': { position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', whiteSpace: 'nowrap' },
@@ -626,7 +713,7 @@ export function RelocationFloorMap({
             },
             '& .pin-from .reloc-pin-label': { bgcolor: FROM },
             '& .pin-to .reloc-pin-label': { bgcolor: TO },
-            '& .pin-old .reloc-pin-label': { bgcolor: paper, color: FROM, borderColor: FROM, borderStyle: 'dashed', boxShadow: 'none' },
+            '& .pin-old .reloc-pin-label': { bgcolor: FOCUS.old.chipBg, color: FOCUS.old.chipInk, borderColor: FOCUS.old.chipInk, boxShadow: 'none' },
             // Sub-zone chip: white, border and text in the major-area colour (inline). Major chip: solid colour, white text.
             '& .reloc-label-text': {
               px: px(CHIP_PAD_X),
@@ -643,6 +730,7 @@ export function RelocationFloorMap({
               '& .reloc-arrow': { animation: 'none' },
               '& .reloc-pin-ring': { animation: 'none', display: 'none' },
               '& .reloc-zone': { transition: 'none', animation: 'none !important' },
+              '& > img, & .reloc-label': { transition: 'none' },
             },
           }}
           overlay={
@@ -674,8 +762,7 @@ export function RelocationFloorMap({
                   className,
                   'data-zone': s.code,
                   'data-state': state,
-                  // Majors with sub-zones stay lighter so their sub-zones do not get a double tint.
-                  fill: alpha(s.color, s.major && hasSubs(s.code) ? 0.05 : ZONE_FILL),
+                  fill: alpha(s.color, s.major && hasSubs(s.code) ? FOCUS.majorFill : FOCUS.zoneFill),
                   stroke: s.color,
                   vectorEffect: 'non-scaling-stroke',
                   ...(pickable ? pickProps(s.code, state) : {}),
@@ -705,7 +792,7 @@ export function RelocationFloorMap({
             const placedAt = l.major ? placedTransform(`label:${l.code}`, at) : undefined
             if (placedAt?.hidden) return null
             const offset = l.major ? 'translate(calc(-100% - 3px), calc(-100% - 3px))' : 'translate(3px, 3px)'
-            const className = ['reloc-label', l.major ? 'is-major' : 'is-sub', `label-${l.state}`, l.related ? 'is-related' : '', l.muted ? 'is-muted' : ''].filter(Boolean).join(' ')
+            const className = ['reloc-label', l.major ? 'is-major' : 'is-sub', `label-${l.state}`, l.related ? 'is-related' : '', l.muted ? 'is-muted' : '', l.code === hovered ? 'is-hover' : ''].filter(Boolean).join(' ')
             const colors = l.major ? { backgroundColor: l.color, borderColor: l.color } : { borderColor: l.color, color: l.color }
             return (
               <Box key={`label-${l.code}`} className={className} data-zone={l.code} aria-hidden style={{ left: `${at.x}%`, top: `${at.y}%` }}>
@@ -795,5 +882,155 @@ export function RelocationFloorMap({
         </Box>
       )}
     </Box>
+  )
+}
+
+interface ExportLabel extends Shape {
+  fontSize: number
+  fontWeight: number
+  related: boolean
+  muted: boolean
+  text: string
+}
+
+interface ExportSvgProps {
+  exportMode: { width: number; imageHref: string }
+  layout: RelocationLayout
+  vis: ReturnType<typeof visualMapper>
+  W: number
+  H: number
+  focus: boolean
+  layers: Shape[][]
+  states: ReadonlyMap<string, ZoneState>
+  related: ReadonlySet<string>
+  parents: ReadonlySet<string>
+  hasSubs: (code: string) => boolean
+  arrows: readonly Arrow[]
+  labels: readonly ExportLabel[]
+  pins: readonly Pin[]
+  centers: ReadonlyMap<string, { x: number; y: number }>
+  crossPills: readonly CrossPill[]
+  toOtherText: string | null
+  placedLabels: ReadonlyMap<string, PlacedLabel>
+}
+
+/** Inline zone style of the export SVG: the same cascade as the `.reloc-zone` classes of the live map. */
+function exportZoneStyle(s: Shape, state: ZoneState, parent: boolean, majorWithSubs: boolean) {
+  const st = {
+    fill: alpha(s.color, majorWithSubs ? FOCUS.majorFill : FOCUS.zoneFill),
+    fillOpacity: 1,
+    stroke: s.color,
+    strokeWidth: s.major ? 2 : 1.5,
+    strokeOpacity: 1,
+    strokeDasharray: undefined as string | undefined,
+  }
+  if (state === 'dim') Object.assign(st, { fillOpacity: FOCUS.dim.fill / FOCUS.zoneFill, strokeWidth: FOCUS.dim.strokeWidth, strokeOpacity: FOCUS.dim.strokeOpacity })
+  if (state === 'disabled') Object.assign(st, { fill: alpha(MAP.relocDim, 0.06), stroke: MAP.relocDim, strokeDasharray: '4 3' })
+  if (parent) Object.assign(st, { strokeWidth: FOCUS.parent.strokeWidth, strokeOpacity: 1, fillOpacity: 1 })
+  if (state === 'from') Object.assign(st, { fill: alpha(FROM, FOCUS.from.fill), stroke: FOCUS.from.stroke, strokeWidth: FOCUS.from.strokeWidth })
+  if (state === 'to') Object.assign(st, { fill: alpha(TO, FOCUS.to.fill), stroke: FOCUS.to.stroke, strokeWidth: FOCUS.to.strokeWidth })
+  if (state === 'old') Object.assign(st, { fill: alpha(FOCUS.old.color, FOCUS.old.fill), stroke: FOCUS.old.stroke, strokeWidth: FOCUS.old.strokeWidth, strokeDasharray: FOCUS.old.dash })
+  return st
+}
+
+/** One-line chip (rect + centred text) at an on-screen top-left position. */
+function SvgChip({ x, y, w, h, text, fontSize, fontWeight, fill, stroke, color, rx, opacity, dashed }: {
+  x: number; y: number; w: number; h: number; text: string; fontSize: number; fontWeight: number; fill: string; stroke?: string; color: string; rx: number; opacity?: number; dashed?: boolean
+}) {
+  return (
+    <g opacity={opacity}>
+      <rect x={x + 0.5} y={y + 0.5} width={Math.max(0, w - 1)} height={Math.max(0, h - 1)} rx={rx} fill={fill} stroke={stroke ?? 'none'} strokeWidth={stroke ? 1 : 0} strokeDasharray={dashed ? '3 2' : undefined} />
+      <text x={x + w / 2} y={y + h / 2} textAnchor="middle" dominantBaseline="central" fontSize={fontSize} fontWeight={fontWeight} fill={color}>
+        {text}
+      </text>
+    </g>
+  )
+}
+
+/** Standalone SVG of a map for the PNG export (fixed size, inline styles, embedded drawing). */
+function ExportSvg({ exportMode, layout, vis, W, H, focus, layers, states, related, parents, hasSubs, arrows, labels, pins, centers, crossPills, toOtherText, placedLabels }: ExportSvgProps) {
+  const { w: vw, h: vh } = vis.bounds
+  const rotation = sceneRotation(layout.rotationDeg)
+  const paper = 'rgba(255,255,255,0.92)'
+  const nonScaling = { vectorEffect: 'non-scaling-stroke' } as const
+  const pillSize = (text: string) => chipSize(text, 12, 700, EXPORT_FONT, 10, 16, 6)
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={Math.round(vw)} height={Math.round(vh)} viewBox={`0 0 ${vw.toFixed(2)} ${vh.toFixed(2)}`} fontFamily={EXPORT_FONT} data-export-layout={layout.id}>
+      <defs>
+        <filter id={`reloc-gray-${layout.id}`}>
+          <feColorMatrix type="saturate" values="0" />
+        </filter>
+      </defs>
+      <rect width={vw} height={vh} fill="#ffffff" />
+      <g transform={`translate(${(vw / 2).toFixed(2)} ${(vh / 2).toFixed(2)}) rotate(${rotation}) translate(${(-W / 2).toFixed(2)} ${(-H / 2).toFixed(2)})`}>
+        <image href={exportMode.imageHref} width={W} height={H} preserveAspectRatio="none" filter={`url(#reloc-gray-${layout.id})`} opacity={focus ? FOCUS.image.focus : FOCUS.image.idle} />
+        <g transform={`scale(${(W / 100).toFixed(4)} ${(H / 100).toFixed(4)})`}>
+          {layers.flat().map((s) => {
+            const state = states.get(s.code)!
+            const st = exportZoneStyle(s, state, parents.has(s.code), s.major && hasSubs(s.code))
+            const r = s.rect
+            const geom = (extra: Record<string, unknown>) =>
+              s.points ? <polygon points={s.points} {...extra} /> : <rect x={r!.x} y={r!.y} width={r!.w} height={r!.h} {...extra} />
+            return (
+              <g key={s.code} data-zone={s.code} data-state={state}>
+                {related.has(s.code) && geom({ fill: 'none', stroke: '#ffffff', strokeWidth: 6, strokeLinejoin: 'round', ...nonScaling })}
+                {geom({ ...st, strokeLinejoin: 'round', ...nonScaling })}
+              </g>
+            )
+          })}
+          {arrows.map((a) => (
+            <g key={`arrow-${a.key}`} data-from={a.key}>
+              <path d={a.d} fill="none" stroke={a.cross ? CROSS : TO} strokeWidth={FOCUS.arrow.strokeWidth} strokeLinecap="round" strokeDasharray={FOCUS.arrow.dash} {...nonScaling} />
+              <polygon points={a.head} fill={a.cross ? CROSS : TO} />
+            </g>
+          ))}
+        </g>
+      </g>
+      {labels.map((l) => {
+        const size = chipSize(l.text, l.fontSize, l.fontWeight, EXPORT_FONT, CHIP_PAD_X)
+        const pl = placedLabels.get(`label:${l.code}`)
+        if (pl?.hidden) return null
+        const zb = vis.box(l.box)
+        const pos = pl ?? (l.major ? { x: zb.x + zb.w - size.w - 3, y: zb.y + zb.h - size.h - 3 } : { x: zb.x + 3, y: zb.y + 3 })
+        const opacity = l.muted ? (l.major ? FOCUS.dim.majorChipOpacity : FOCUS.dim.chipOpacity) : undefined
+        return (
+          <SvgChip
+            key={`label-${l.code}`}
+            {...pos}
+            {...size}
+            text={l.text}
+            fontSize={l.fontSize}
+            fontWeight={l.fontWeight}
+            rx={4}
+            opacity={opacity}
+            {...(l.major ? { fill: l.color, color: '#ffffff' } : { fill: paper, stroke: l.color, color: l.color })}
+          />
+        )
+      })}
+      {crossPills.map((p) => (
+        <SvgChip key={`cross-${p.key}`} {...p.box} text={p.text} fontSize={12} fontWeight={700} rx={p.box.h / 2} fill={CROSS} color="#ffffff" />
+      ))}
+      {toOtherText && (() => {
+        const size = pillSize(toOtherText)
+        return <SvgChip x={vw - 12 - size.w} y={vh / 2 - size.h / 2} {...size} text={toOtherText} fontSize={12} fontWeight={700} rx={size.h / 2} fill={CROSS} color="#ffffff" />
+      })()}
+      {pins.map((p) => {
+        const c = vis.map(centers.get(p.code)!)
+        const size = chipSize(p.label, 11, 800, EXPORT_FONT, PIN_PAD_X, 14, 4)
+        const pos = placedLabels.get(`pin:${p.code}`) ?? { x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h }
+        const color = p.kind === 'to' ? TO : FROM
+        const caption =
+          p.kind === 'old'
+            ? { fill: FOCUS.old.chipBg, stroke: FOCUS.old.chipInk, color: FOCUS.old.chipInk }
+            : { fill: color, color: '#ffffff' }
+        return (
+          <g key={`pin-${p.kind}-${p.code}`} className={`pin-${p.kind}`} data-zone={p.code}>
+            {p.kind === 'to' && <circle cx={c.x} cy={c.y} r={11} fill={TO} opacity={0.25} />}
+            <circle cx={c.x} cy={c.y} r={6} fill="#ffffff" stroke={color} strokeWidth={p.kind === 'old' ? FOCUS.old.pinBorder : FOCUS.from.pinBorder} />
+            <SvgChip x={pos.x} y={pos.y} {...size} text={p.label} fontSize={11} fontWeight={800} rx={6} {...caption} />
+          </g>
+        )
+      })}
+    </svg>
   )
 }

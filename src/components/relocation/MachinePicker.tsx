@@ -1,4 +1,4 @@
-import { Alert, Autocomplete, Box, type AutocompleteRenderGroupParams, type AutocompleteRenderOptionState, Button, IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
+import { alpha, Alert, Autocomplete, Box, type AutocompleteRenderGroupParams, type AutocompleteRenderOptionState, Button, IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import { useCallback, useDeferredValue, useEffect, useMemo, useState, type ClipboardEvent, type HTMLAttributes, type Key } from 'react'
@@ -20,6 +20,8 @@ interface Props<R extends Row> {
   selected: readonly string[]
   selectedRows: readonly R[]
   pendingCodes: ReadonlySet<string>
+  /** Selected machines rejected by the API (409 codes): their rows are marked red. */
+  conflictCodes?: ReadonlySet<string>
   /** Assets at an Outside location: not offered, and rejected with their own message when typed or pasted. */
   isOutside?: (row: R) => boolean
   /** Building (API fac) of an asset, for grouping the dropdown by building → zone. */
@@ -64,7 +66,7 @@ const REPORT_LABELS: Record<Exclude<keyof CodeCheck, 'accepted'>, { vi: string; 
   pending: { vi: 'Đang có yêu cầu PENDING', en: 'Already in a PENDING request' },
 }
 
-export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, selected, selectedRows, pendingCodes, isOutside, facOf, onHoverZone, onAdd, onRemove, onClear }: Props<R>) {
+export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, selected, selectedRows, pendingCodes, conflictCodes, isOutside, facOf, onHoverZone, onAdd, onRemove, onClear }: Props<R>) {
   const vi = lang === 'vi'
   const [report, setReport] = useState<CodeCheck | null>(null)
   const [input, setInput] = useState('')
@@ -310,6 +312,9 @@ export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, s
                   key={r.code}
                   hover
                   data-code={r.code}
+                  data-conflict={conflictCodes?.has(r.code) || undefined}
+                  aria-invalid={conflictCodes?.has(r.code) || undefined}
+                  sx={conflictCodes?.has(r.code) ? (theme) => ({ bgcolor: alpha(theme.palette.error.main, 0.12), '& td': { color: 'error.main', fontWeight: 700 } }) : undefined}
                   onMouseEnter={() => onHoverZone?.(r.currentZone)}
                   onMouseLeave={() => onHoverZone?.(null)}
                   onFocus={() => onHoverZone?.(r.currentZone)}
