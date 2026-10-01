@@ -15,14 +15,23 @@ export const FAC_LABELS: Readonly<Record<string, { vi: string; en: string }>> = 
 }
 
 /** Statuses that block another request for the same machine (BE OPEN_STATUSES / UX_F2FAH_OpenRequest). */
-export const OPEN_RELOCATION_STATUSES: readonly RelocationStatus[] = ['REQ_PENDING_PE', 'REQ_PENDING_BOD', 'REQ_APPROVED']
+export const OPEN_RELOCATION_STATUSES: readonly RelocationStatus[] = ['REQ_PENDING', 'REQ_APPROVED']
 
 export const RELOCATION_STATUS_LABELS: Readonly<Record<RelocationStatus, { vi: string; en: string }>> = {
-  REQ_PENDING_PE: { vi: 'Chờ PE duyệt', en: 'Pending PE approval' },
-  REQ_PENDING_BOD: { vi: 'Chờ BoD duyệt', en: 'Pending BoD approval' },
+  REQ_PENDING: { vi: 'Chờ duyệt', en: 'Pending approval' },
   REQ_APPROVED: { vi: 'Đã duyệt', en: 'Approved' },
   REQ_REJECTED: { vi: 'Từ chối', en: 'Rejected' },
   REQ_DONE: { vi: 'Hoàn tất', en: 'Done' },
+}
+
+export function isKnownRelocationStatus(status: string | null | undefined): status is RelocationStatus {
+  return !!status && Object.prototype.hasOwnProperty.call(RELOCATION_STATUS_LABELS, status)
+}
+
+/** Translated label; an unknown status (e.g. a legacy code from the API) is shown as-is, null as "-". */
+export function relocationStatusLabel(status: string | null | undefined, vi: boolean): string {
+  if (isKnownRelocationStatus(status)) return vi ? RELOCATION_STATUS_LABELS[status].vi : RELOCATION_STATUS_LABELS[status].en
+  return status || '-'
 }
 
 /** Zones of this fac are never destinations, and assets there cannot be picked. */

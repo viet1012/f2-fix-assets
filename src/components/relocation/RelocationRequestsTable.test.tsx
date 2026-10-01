@@ -14,10 +14,20 @@ const req: RelocationRequest = {
   plannedMoveDate: '2026-10-05',
   plannedDoneDate: '2026-10-31',
   reason: 'Layout',
-  status: 'REQ_PENDING_PE',
+  status: 'REQ_PENDING',
 }
 
 describe('RelocationRequestsTable', () => {
+  it('status labels (vi/en); an unknown status is shown as its raw code', () => {
+    const statuses = ['REQ_PENDING', 'REQ_APPROVED', 'REQ_REJECTED', 'REQ_DONE', 'REQ_LEGACY_X']
+    const reqs = statuses.map((s, i) => ({ ...req, id: `RL-2026-000${i + 1}`, status: s as RelocationRequest['status'] }))
+    const cells = () => statuses.map((_, i) => document.querySelector<HTMLElement>(`tr[data-request="RL-2026-000${i + 1}"]`)!.querySelector('.MuiChip-label')!.textContent)
+    const { rerender } = render(<RelocationRequestsTable lang="vi" requests={reqs} />)
+    expect(cells()).toEqual(['Chờ duyệt', 'Đã duyệt', 'Từ chối', 'Hoàn tất', 'REQ_LEGACY_X'])
+    rerender(<RelocationRequestsTable lang="en" requests={reqs} />)
+    expect(cells()).toEqual(['Pending approval', 'Approved', 'Rejected', 'Done', 'REQ_LEGACY_X'])
+  })
+
   it('formats yyyy-MM-dd as dd/MM/yyyy (vi) and keeps it (en), without a Date', () => {
     expect(formatRequestDate('2026-12-31', true)).toBe('31/12/2026')
     expect(formatRequestDate('2026-01-01', false)).toBe('2026-01-01')

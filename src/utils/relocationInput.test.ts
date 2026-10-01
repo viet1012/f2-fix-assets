@@ -37,9 +37,12 @@ describe('checkCodes', () => {
 
   it('blocks machines that are in an open request', () => {
     const pending = pendingCodesOf([
-      { status: 'REQ_PENDING_PE', items: [{ code: 'M1', name: '', fromZone: null, fromFloor: null, moveType: 'same' }] },
+      { status: 'REQ_PENDING', items: [{ code: 'M1', name: '', fromZone: null, fromFloor: null, moveType: 'same' }] },
+      { status: 'REQ_APPROVED', items: [{ code: 'M3', name: '', fromZone: null, fromFloor: null, moveType: null }] },
+      { status: 'REQ_REJECTED', items: [{ code: 'M4', name: '', fromZone: null, fromFloor: null, moveType: null }] },
       { status: 'REQ_DONE', items: [{ code: 'M2', name: '', fromZone: null, fromFloor: null, moveType: null }] },
     ])
+    expect([...pending].sort()).toEqual(['M1', 'M3'])
     expect(checkCodes(['M1', 'M2'], { ...opts, pendingCodes: pending })).toMatchObject({ accepted: ['M2'], pending: ['M1'] })
   })
 })

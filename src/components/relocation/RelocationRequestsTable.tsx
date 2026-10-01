@@ -2,24 +2,23 @@ import { Button, Chip, CircularProgress, type ChipProps, IconButton, Table, Tabl
 import ImageOutlined from '@mui/icons-material/ImageOutlined'
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded'
 import type { Lang } from '../../types/fixedAsset'
-import { RELOCATION_STATUS_LABELS } from '../../config/relocation'
+import { isKnownRelocationStatus, relocationStatusLabel } from '../../config/relocation'
 import type { RelocationRequest, RelocationStatus } from '../../types/relocation'
 import { formatRequestDate } from '../../utils/relocationForm'
 
 export { formatRequestDate }
 
 const STATUS_COLOR: Record<RelocationStatus, ChipProps['color']> = {
-  REQ_PENDING_PE: 'warning',
-  REQ_PENDING_BOD: 'warning',
+  REQ_PENDING: 'warning',
   REQ_APPROVED: 'info',
   REQ_REJECTED: 'error',
   REQ_DONE: 'success',
 }
 
 /** Status chip: known REQ_* values are translated, anything else is shown as-is. */
-function StatusChip({ status, vi }: { status: RelocationStatus | null; vi: boolean }) {
-  const label = status ? RELOCATION_STATUS_LABELS[status] : undefined
-  return <Chip size="small" color={(status && STATUS_COLOR[status]) || 'default'} label={label ? (vi ? label.vi : label.en) : (status ?? '-')} title={status ?? undefined} />
+function StatusChip({ status, vi }: { status: string | null; vi: boolean }) {
+  const color = isKnownRelocationStatus(status) ? STATUS_COLOR[status] : 'default'
+  return <Chip size="small" color={color} label={relocationStatusLabel(status, vi)} title={status ?? undefined} />
 }
 
 const isWebUrl = (u: string) => /^https?:\/\//i.test(u)

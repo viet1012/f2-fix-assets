@@ -21,7 +21,7 @@ afterEach(() => {
 describe('API relocation repository', () => {
   it('POSTs the request body and maps the 201 answer', async () => {
     const fetchMock = vi.fn(() =>
-      json({ requestNo: 'RL-2026-0001', status: 'REQ_PENDING_PE', skipped: [], items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, moveType: 'building' }] }, 201),
+      json({ requestNo: 'RL-2026-0001', status: 'REQ_PENDING', skipped: [], items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, moveType: 'building' }] }, 201),
     )
     vi.stubGlobal('fetch', fetchMock)
     const created = await new ApiRelocationRequestRepository('').create(input)
@@ -35,11 +35,11 @@ describe('API relocation repository', () => {
       reason: 'Layout change',
       requestedBy: 'E001',
     })
-    expect(created).toMatchObject({ id: 'RL-2026-0001', status: 'REQ_PENDING_PE', items: [{ code: 'M1', name: 'Press', moveType: 'building' }], skipped: [] })
+    expect(created).toMatchObject({ id: 'RL-2026-0001', status: 'REQ_PENDING', items: [{ code: 'M1', name: 'Press', moveType: 'building' }], skipped: [] })
   })
 
   it('sends the input date strings untouched (no Date / toISOString shift) and returns skipped', async () => {
-    const fetchMock = vi.fn(() => json({ requestNo: 'RL-2026-0002', status: 'REQ_PENDING_PE', skipped: ['M9'], items: [] }, 201))
+    const fetchMock = vi.fn(() => json({ requestNo: 'RL-2026-0002', status: 'REQ_PENDING', skipped: ['M9'], items: [] }, 201))
     vi.stubGlobal('fetch', fetchMock)
     const created = await new ApiRelocationRequestRepository('').create({ ...input, plannedMoveDate: '2026-12-31', plannedDoneDate: '2027-01-01' })
     const body = String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)
@@ -50,11 +50,11 @@ describe('API relocation repository', () => {
   })
 
   it('lists newest requests oldest first', async () => {
-    const req = (no: string) => ({ requestNo: no, status: 'REQ_PENDING_PE', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: null, positionAAA: null }, status: 'REQ_PENDING_PE' }] })
+    const req = (no: string) => ({ requestNo: no, status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: null, positionAAA: null }, status: 'REQ_PENDING' }] })
     vi.stubGlobal('fetch', vi.fn(() => json({ items: [req('RL-2026-0002'), req('RL-2026-0001')], page: 0, size: 100, total: 2 })))
     const list = await new ApiRelocationRequestRepository('').list()
     expect(list.map((r) => r.id)).toEqual(['RL-2026-0001', 'RL-2026-0002'])
-    expect(list[0]).toMatchObject({ plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', to: { layoutId: 'floor1', zone: 'A1-1' }, items: [{ code: 'M1', fromZone: 'A2', status: 'REQ_PENDING_PE' }] })
+    expect(list[0]).toMatchObject({ plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', to: { layoutId: 'floor1', zone: 'A1-1' }, items: [{ code: 'M1', fromZone: 'A2', status: 'REQ_PENDING' }] })
   })
 
   it('throws RelocationApiError with the 409 codes', async () => {
@@ -67,7 +67,7 @@ describe('API relocation repository', () => {
 
 describe('get (detail snapshot)', () => {
   it('GETs /{requestNo} and maps from / to per machine', async () => {
-    const detail = { requestNo: 'RL-2026-0001', status: 'REQ_PENDING_PE', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: null, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, status: 'REQ_PENDING_PE' }] }
+    const detail = { requestNo: 'RL-2026-0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: null, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, status: 'REQ_PENDING' }] }
     const fetchMock = vi.fn(() => json(detail))
     vi.stubGlobal('fetch', fetchMock)
     const r = await new ApiRelocationRequestRepository('').get('RL-2026-0001')
@@ -94,7 +94,7 @@ describe('uploadDrawing', () => {
   it('throws RelocationApiError on failure; list maps drawingUrl and createdAt', async () => {
     vi.stubGlobal('fetch', vi.fn(() => json({ error: 'Storage offline' }, 503)))
     await expect(new ApiRelocationRequestRepository('').uploadDrawing('RL-2026-0001', new Blob(['png']))).rejects.toMatchObject({ status: 503, message: 'Storage offline' })
-    const item = { requestNo: 'RL-2026-0001', status: 'REQ_PENDING_PE', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: 'https://x/a.png', to: { positionA: 'A1', positionAA: null, positionAAA: null }, items: [] }
+    const item = { requestNo: 'RL-2026-0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: 'https://x/a.png', to: { positionA: 'A1', positionAA: null, positionAAA: null }, items: [] }
     vi.stubGlobal('fetch', vi.fn(() => json({ items: [item] })))
     const [r] = await new ApiRelocationRequestRepository('').list()
     expect(r).toMatchObject({ drawingUrl: 'https://x/a.png', createdAt: '2026-10-01T09:00:00' })

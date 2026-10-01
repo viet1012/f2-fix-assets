@@ -304,11 +304,15 @@ function placeName(layout: RelocationLayout, fac: string | null, vi: boolean) {
   return layout.title.split(' - ').pop() ?? layout.title
 }
 
+/** Control-point offset of same-layout arrows (share of their length): live map / export (flatter, lift <= 15%). */
+export const ARROW_BOW = { live: 0.22, export: 0.12 } as const
+
 /**
  * Curved arrow (quadratic, bowed to the left of travel) from a to b, in the 0-100 viewBox. Geometry is computed in
  * image pixels so the curve and head keep their shape although the viewBox is stretched to the image aspect ratio.
+ * `downward`: bow towards the bottom of the drawing instead (export: the arrow does not loop up over other zones).
  */
-function arrowGeometry(a: { x: number; y: number }, b: { x: number; y: number }, imgW: number, imgH: number) {
+function arrowGeometry(a: { x: number; y: number }, b: { x: number; y: number }, imgW: number, imgH: number, bow: number = ARROW_BOW.live, downward = false) {
   const toPx = (p: { x: number; y: number }) => ({ x: (p.x * imgW) / 100, y: (p.y * imgH) / 100 })
   const toPct = (p: { x: number; y: number }) => `${((p.x / imgW) * 100).toFixed(3)},${((p.y / imgH) * 100).toFixed(3)}`
   const p0 = toPx(a)
@@ -316,7 +320,8 @@ function arrowGeometry(a: { x: number; y: number }, b: { x: number; y: number },
   const dx = p2.x - p0.x
   const dy = p2.y - p0.y
   const len = Math.hypot(dx, dy) || 1
-  const c = { x: (p0.x + p2.x) / 2 + (dy / len) * len * 0.22, y: (p0.y + p2.y) / 2 - (dx / len) * len * 0.22 }
+  const flip = downward && -dx / len < 0 ? -1 : 1
+  const c = { x: (p0.x + p2.x) / 2 + flip * dy * bow, y: (p0.y + p2.y) / 2 - flip * dx * bow }
   const tx = p2.x - c.x
   const ty = p2.y - c.y
   const tl = Math.hypot(tx, ty) || 1
@@ -414,7 +419,8 @@ export function RelocationFloorMap({
   ctx = DEFAULT_CONTEXT,
   exportMode,
 }: Props) {
-  const vi = lang === 'vi'
+  // The export is always in English.
+  const vi = lang === 'vi' && !exportMode
   const theme = useTheme()
   const upright = uprightTransform(layout.rotationDeg)
   const interactive = role === 'after' ? onPickZone !== undefined : onOpenZone !== undefined
@@ -520,7 +526,13 @@ export function RelocationFloorMap({
   const arrows: Arrow[] = toCenter
     ? [...placed.keys()]
         .filter((zone) => zone !== toZone && centers.has(zone))
-        .map((zone) => ({ key: zone, cross: false, ...arrowGeometry(centers.get(zone)!, toCenter, layout.imgW, layout.imgH) }))
+        .map((zone) => ({
+          key: zone,
+          cross: false,
+          ...(exportMode
+            ? arrowGeometry(centers.get(zone)!, toCenter, layout.imgW, layout.imgH, ARROW_BOW.export, true)
+            : arrowGeometry(centers.get(zone)!, toCenter, layout.imgW, layout.imgH)),
+        }))
     : []
 
   // On-screen px layout (a nominal width until the scene is measured, e.g. in tests).
@@ -565,7 +577,8 @@ export function RelocationFloorMap({
     const muted = focus && !isRel && !parents.has(s.code)
     const fontSize = sceneW > 0 ? Math.round(Math.min(s.major ? 14 : 13, Math.max(9, Math.min(w, h) * 0.2))) : 11
     const n = counts.get(s.code) ?? 0
-    const text = s.major ? s.code : showCounts && !muted ? `${s.code} · ${n}` : s.code
+    // Export: zone chips never carry machine counts.
+    const text = s.major ? s.code : showCounts && !muted && !exportMode ? `${s.code} · ${n}` : s.code
     return [{ ...s, fontSize, fontWeight: s.major ? 800 : 700, related: isRel, muted, text, state }]
   })
   // Collision layout: related sub-zone chips and edge pills stay put; pin captions (above the dot) move up, the

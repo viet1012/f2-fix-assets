@@ -24,7 +24,8 @@ export interface RelocationItem {
 }
 
 /** F2_FIXED_ASSET_HISTORY.Status of relocation rows (always REQ_*). */
-export type RelocationStatus = 'REQ_PENDING_PE' | 'REQ_PENDING_BOD' | 'REQ_APPROVED' | 'REQ_REJECTED' | 'REQ_DONE'
+/** Flow: REQ_PENDING -> REQ_APPROVED / REQ_REJECTED -> REQ_DONE. */
+export type RelocationStatus = 'REQ_PENDING' | 'REQ_APPROVED' | 'REQ_REJECTED' | 'REQ_DONE'
 
 
 export interface RelocationRequest {

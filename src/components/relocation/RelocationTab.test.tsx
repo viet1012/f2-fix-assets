@@ -157,9 +157,9 @@ describe('RelocationTab - browse by zone', () => {
   it('machines in an open request and wrong-kind machines are disabled and cannot be selected', async () => {
     mockFetch(false, [
       {
-        requestNo: 'RL-2026-0001', status: 'REQ_PENDING_PE', requestedBy: 'E1', reason: 'x', plannedMoveDate: '2026-10-01', plannedDoneDate: '2026-10-02',
+        requestNo: 'RL-2026-0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'x', plannedMoveDate: '2026-10-01', plannedDoneDate: '2026-10-02',
         to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null },
-        items: [{ machineCode: 'A-006-2', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, status: 'REQ_PENDING_PE' }],
+        items: [{ machineCode: 'A-006-2', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, status: 'REQ_PENDING' }],
       },
     ])
     const { container } = render(<RelocationTab lang="vi" />)
@@ -167,7 +167,7 @@ describe('RelocationTab - browse by zone', () => {
     await waitFor(() => expect(item('A-006-2').getAttribute('data-reason')).toBe('pending'))
     // Submitted requests table: RequestNo and translated status.
     expect(screen.getByText('RL-2026-0001')).toBeTruthy()
-    expect(screen.getByText('Chờ PE duyệt')).toBeTruthy()
+    expect(screen.getByText('Chờ duyệt')).toBeTruthy()
     expect(box('A-006-2').disabled).toBe(true)
     fireEvent.click(item('A-006-2').querySelector('[role="button"]')!)
     fireEvent.click(item('A-008-1').querySelector('[role="button"]')!)
@@ -363,7 +363,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
   const DRAWING_URL = 'https://files.example/drawings/RL-2026-0001.png'
   const apiReq = (drawingUrl: string | null) => ({
     requestNo: 'RL-2026-0001',
-    status: 'REQ_PENDING_PE',
+    status: 'REQ_PENDING',
     requestedBy: 'E001',
     reason: 'Re-layout',
     plannedMoveDate: today,
@@ -371,13 +371,13 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     createdAt: `${today}T09:00:00`,
     drawingUrl,
     to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null },
-    items: [{ machineCode: 'A-006-1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, status: 'REQ_PENDING_PE' }],
+    items: [{ machineCode: 'A-006-1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, status: 'REQ_PENDING' }],
   })
   const created201 = () =>
     json(
       {
         requestNo: 'RL-2026-0001',
-        status: 'REQ_PENDING_PE',
+        status: 'REQ_PENDING',
         skipped: ['A-006-2'],
         items: [{ machineCode: 'A-006-1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, moveType: 'same' }],
       },
@@ -506,7 +506,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
       plannedDoneDate: '2026-11-09',
       createdAt: '2026-10-20T08:00:00',
       to: { positionA: 'A3', positionAA: 'A3-1', positionAAA: null },
-      items: [{ machineCode: 'A-006-1', from: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, to: { positionA: 'A3', positionAA: 'A3-1', positionAAA: null }, status: 'REQ_PENDING_PE' }],
+      items: [{ machineCode: 'A-006-1', from: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, to: { positionA: 'A3', positionAA: 'A3-1', positionAAA: null }, status: 'REQ_PENDING' }],
     }
     const fetchMock = mockSubmit(created201, drawingOk, [apiReq(null)], detail)
     render(<RelocationTab lang="vi" />)
