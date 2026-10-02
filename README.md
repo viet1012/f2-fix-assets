@@ -19,7 +19,7 @@ The frontend intentionally keeps the current Node API contract so it can run imm
 - `POST /api/upload`
 - `POST /api/upload-from-url`
 
-Set `VITE_API_BASE_URL` when FE and BE are hosted on different origins. During local development, Vite proxies `/api` to `http://localhost:4011`.
+The browser always calls `/api` on the page's own origin: login uses a session cookie, which is only sent same-origin. During local development, Vite proxies `/api` to `VITE_PROXY_TARGET` (default `http://localhost:8080`). `VITE_API_BASE_URL` is ignored in dev and should stay empty for builds (a value on another origin logs "API khác origin: cookie đăng nhập sẽ không hoạt động" and login will not work).
 
 ## Run
 
@@ -28,10 +28,41 @@ npm install
 npm run dev
 ```
 
+### Chạy dev với BE trên server
+
+Không đặt `VITE_API_BASE_URL`; chỉ đổi đích của proxy Vite, trong `.env.local` (không commit):
+
+```bash
+VITE_PROXY_TARGET=http://192.168.122.16:9097
+```
+
+Khởi động lại `npm run dev`. Trình duyệt vẫn gọi `http://localhost:5173/api/...`; Vite chuyển tiếp sang server nên không có CORS và cookie phiên vẫn được gửi.
+
 ## Build
 
 ```bash
 npm run build
+```
+
+### Deploy: FE và BE cùng origin (nginx `/api` → BE)
+
+Build với `VITE_API_BASE_URL` để trống, phục vụ `dist/` và chuyển `/api` sang BE trên cùng host:
+
+```nginx
+server {
+  listen 80;
+  root /var/www/f2-fixed-asset/dist;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:9097;   # BE
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location / {
+    try_files $uri /index.html;
+  }
+}
 ```
 
 ## Main structure
