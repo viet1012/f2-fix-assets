@@ -1,4 +1,4 @@
-import { alpha, Alert, Box, Button, ButtonBase, Link, Stack, Typography } from '@mui/material'
+import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, Link, Stack, Switch, Typography } from '@mui/material'
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { facLabel } from '../../config/relocation'
 import { FLOORS, ZONE_INDEX, type LayoutId } from '../../data/mapData'
@@ -7,6 +7,7 @@ import { useMapViewSettings } from '../../hooks/useMapViewSettings'
 import { useRelocationDraft } from '../../hooks/useRelocationDraft'
 import { useRelocationRequests } from '../../hooks/useRelocationRequests'
 import { RelocationApiError, relocationErrorMessage } from '../../api/relocationRequests'
+import { useCurrentUser } from '../../auth/authContext'
 import type { Lang } from '../../types/fixedAsset'
 import type { AssetLocation, LocationZone } from '../../types/location'
 import type { RelocationRequest, RelocationTarget } from '../../types/relocation'
@@ -18,7 +19,8 @@ import { EMPTY_FORM, type RelocationFormValues } from '../../utils/relocationFor
 import { downloadBlob, exportRelocationPng, snapshotExportInput, type RelocationExportInput } from '../../utils/exportRelocationPng'
 import { buildRequestItems, pendingCodesOf, rowsInZone, sourceZonesByFac } from '../../utils/relocationInput'
 import { SectionCard } from '../common/SectionCard'
-import { DEFAULT_MAP_VIEW, type MapView } from '../map/MapScene'
+import MapOutlined from '@mui/icons-material/MapOutlined'
+import { createScrollSync, DEFAULT_MAP_VIEW, type MapView } from '../map/MapScene'
 import { ErrorState, LoadingState } from '../common/States'
 import { MachinePicker, SelectionSummary } from './MachinePicker'
 import { FOCUS, RelocationFloorMap } from './RelocationFloorMap'
@@ -34,6 +36,16 @@ const MAP = tokens.light // Solid state colours with white text: the same in bot
 /** Space reserved above each map for its card info (pills / banner / route), so both map frames line up. */
 const MAP_INFO_MIN_H = 76
 
+/** Empty map card body: small icon + one hint line, capped at ~96px (no tall map frame). */
+function MapEmpty({ children, testId }: { children: ReactNode; testId: string }) {
+  return (
+    <Stack direction="row" spacing={1} data-testid={testId} sx={{ alignItems: 'center', maxHeight: 96, py: 1.5, px: 1.25, borderRadius: 1, border: 1, borderStyle: 'dashed', borderColor: 'divider', color: 'text.secondary' }}>
+      <MapOutlined fontSize="small" aria-hidden sx={{ flexShrink: 0, opacity: 0.7 }} />
+      <Typography variant="body2" color="inherit">{children}</Typography>
+    </Stack>
+  )
+}
+
 /** Map card title: 12px colour square + bold title. */
 function CardTitle({ color, children }: { color: string; children: ReactNode }) {
   return (
@@ -48,7 +60,8 @@ function CardTitle({ color, children }: { color: string; children: ReactNode }) 
 type DrawingState = { status: 'saving' } | { status: 'saved'; webUrl: string | null; fileName: string } | { status: 'failed' }
 
 /** Relocation request tab: assets and zones come from the location API (Factory 2, every div), never from static data. */
-export default function RelocationTab({ lang }: { lang: Lang }) {
+/** account: the logged-in user (session), shown as the requester and used for "my requests". */
+export default function RelocationTab({ lang, account }: { lang: Lang; account: string }) {
   const vi = lang === 'vi'
   const assets = useAssetsWithLocation()
   const locations = useLocations()
@@ -70,11 +83,12 @@ export default function RelocationTab({ lang }: { lang: Lang }) {
   if (assets.status.type === 'loading' || locations.status.type === 'loading') {
     return <LoadingState label={vi ? 'Đang tải dữ liệu vị trí...' : 'Loading location data...'} />
   }
-  return <RelocationWorkspace lang={lang} rows={assets.data} locations={locations.data} />
+  return <RelocationWorkspace lang={lang} account={account} rows={assets.data} locations={locations.data} />
 }
 
-function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: readonly AssetLocation[]; locations: readonly LocationZone[] }) {
+function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; account: string; rows: readonly AssetLocation[]; locations: readonly LocationZone[] }) {
   const vi = lang === 'vi'
+  const user = useCurrentUser()
   const { byCode } = useMemo(() => buildIndexes(rows), [rows])
   const catalog = useMemo(() => buildLocationCatalog(locations, ZONE_INDEX), [locations])
   const zoneCount = catalog.count
@@ -95,16 +109,31 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
   const [mapSettings, updateMapSettings] = useMapViewSettings()
   /** Zone of the selected-machine row being hovered: flashed on both maps. */
   const [hoverZone, setHoverZone] = useState<string | null>(null)
-  // Shared zoom/scroll while "Sync zoom" is on; each map keeps its own otherwise.
-  const [sharedView, setSharedView] = useState<MapView>(DEFAULT_MAP_VIEW)
-  const mapProps = {
-    showAll: mapSettings.showAll,
-    showCounts: mapSettings.showCounts,
-    highlightZone: hoverZone,
-    ...(mapSettings.syncZoom ? { view: sharedView, onViewChange: setSharedView } : {}),
-    ctx,
-  }
+  // "Sync zoom": the zoom step is shared state; the scroll position never is. Live scroll goes map-to-map through the
+  // scroll sync group (DOM only); the last stopped position is kept in a ref, to seed a map that mounts later.
+  const [sharedZoom, setSharedZoom] = useState(DEFAULT_MAP_VIEW.zoomIndex)
+  const sharedScroll = useRef({ scrollX: DEFAULT_MAP_VIEW.scrollX, scrollY: DEFAULT_MAP_VIEW.scrollY })
+  const onSharedViewChange = useCallback((v: MapView) => {
+    sharedScroll.current = { scrollX: v.scrollX, scrollY: v.scrollY }
+    setSharedZoom(v.zoomIndex)
+  }, [])
+  const scrollSync = useMemo(() => (mapSettings.syncZoom ? createScrollSync() : undefined), [mapSettings.syncZoom])
+  // Props shared by both maps, stable across renders that do not change them (RelocationFloorMap is memoised).
+  const mapProps = useMemo(
+    () => ({
+      showAll: mapSettings.showAll,
+      showCounts: mapSettings.showCounts,
+      use3d: mapSettings.image3d,
+      highlightZone: hoverZone,
+      ...(scrollSync ? { view: { zoomIndex: sharedZoom, ...sharedScroll.current }, onViewChange: onSharedViewChange, scrollSync } : {}),
+      ctx,
+    }),
+    [mapSettings.showAll, mapSettings.showCounts, mapSettings.image3d, hoverZone, scrollSync, sharedZoom, onSharedViewChange, ctx],
+  )
   const [form, setForm] = useState<RelocationFormValues>(EMPTY_FORM)
+  /** "Only my requests" filter of the submitted table. */
+  const [mineOnly, setMineOnly] = useState(false)
+  const isMine = (r: RelocationRequest) => r.requestedBy.trim().toLowerCase() === account.trim().toLowerCase()
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [lastCreated, setLastCreated] = useState<{ id: string; count: number; skipped: readonly string[]; drawing: DrawingState } | null>(null)
@@ -130,7 +159,12 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
     if (id) setViewBefore(id)
   }
   const afterLayout = layoutOf(afterLayoutId)
+  const afterId = afterLayout?.id ?? null
+  const afterPickable = useCallback((code: string) => afterId !== null && isCatalogTarget(catalog, afterId, code), [catalog, afterId])
+  const afterTray = useMemo(() => (afterId ? catalogTray(catalog, afterId) : []), [catalog, afterId])
   const moverCount = draft.target ? movers(draft.selectedRows, draft.target, ctx).length : 0
+  /** Side-by-side rows stretch to equal heights only when both sides have content; an empty side stays compact. */
+  const rowAlign = draft.selectedRows.length > 0 && draft.target ? 'stretch' : 'start'
 
   // Card headers: "Toà A / 1F" of a layout (building from the machines there, else from the API zones of the layout).
   const placeOf = (id: LayoutId | null, fac: string | null) => {
@@ -181,6 +215,10 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
   const pickOnMap = (target: RelocationTarget) => {
     if (isCatalogTarget(catalog, target.layoutId, target.zone)) setTarget(target)
   }
+  /** Stable map callback (latest pickOnMap through a ref), so the memoised After map does not re-render for it. */
+  const pickRef = useRef(pickOnMap)
+  pickRef.current = pickOnMap
+  const onPickZone = useCallback((target: RelocationTarget) => pickRef.current(target), [])
 
   const pngOf = async (id: string) => {
     const cached = pngs.current.get(id)
@@ -225,7 +263,8 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
       }
       await uploadDrawing(r.id, await pngOf(r.id))
     } catch (e) {
-      setDrawingError(`${vi ? `Chưa lưu được bản vẽ ${r.id}` : `Could not save the drawing of ${r.id}`}: ${e instanceof Error ? e.message : String(e)}`)
+      if (e instanceof RelocationApiError && e.status === 403) setDrawingError(vi ? 'Chỉ người tạo mới được tải lên lại' : 'Only the requester can re-upload the drawing')
+      else setDrawingError(`${vi ? `Chưa lưu được bản vẽ ${r.id}` : `Could not save the drawing of ${r.id}`}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       reuploading.current.delete(r.id)
       setTableUploads((prev) => {
@@ -245,7 +284,9 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
       const created = await create({
         items: buildRequestItems(draft.selectedRows, draft.target, ctx),
         to: draft.target,
-        requestedBy: values.requestedBy.trim(),
+        // Not sent: the server takes the session account; kept for the local copy and the PNG.
+        requestedBy: account,
+        requesterName: user?.name ?? null,
         plannedMoveDate: values.plannedMoveDate,
         plannedDoneDate: values.plannedDoneDate,
         reason: values.reason.trim(),
@@ -333,12 +374,12 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
       )}
       {drawingError && <Alert severity="error" onClose={() => setDrawingError(null)}>{drawingError}</Alert>}
 
-      {/* Pick machines + destination side by side (3fr / 2fr) from lg, stacked below; equal heights. */}
-      <Box sx={{ display: 'grid', gap: density.gap, alignItems: 'stretch', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' } }}>
+      {/* Pick machines + destination side by side (3fr / 2fr) from lg, stacked below; equal heights only when both have content. */}
+      <Box data-testid="reloc-row-pick" data-align={rowAlign} sx={{ display: 'grid', gap: density.gap, alignItems: rowAlign, gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' } }}>
       <SectionCard
         title={vi ? '1. Chọn máy' : '1. Pick machines'}
         actions={<SelectionSummary lang={lang} selectedRows={draft.selectedRows} onClear={draft.clear} />}
-        sx={{ height: '100%' }}
+        sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}
       >
         <MachinePicker
           lang={lang}
@@ -357,7 +398,7 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
         />
       </SectionCard>
 
-      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={{ height: '100%' }}>
+      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
         <TargetLocationSelect
           lang={lang}
           layouts={FLOORS}
@@ -378,14 +419,14 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
       </Stack>
 
       {/* Two equal map columns (same frame ratio and fit); the zone machine list is a third column when open. */}
-      <Box sx={{ display: 'grid', gap: density.gap, gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: openZone ? 'repeat(2, minmax(0, 1fr)) 300px' : 'repeat(2, minmax(0, 1fr))' } }}>
+      <Box sx={{ display: 'grid', gap: density.gap, alignItems: beforeLayout && afterLayout ? 'stretch' : 'start', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: openZone ? 'repeat(2, minmax(0, 1fr)) 300px' : 'repeat(2, minmax(0, 1fr))' } }}>
         <SectionCard
           title={<CardTitle color={MAP.relocFrom}>{vi ? 'Bố trí hiện tại (Trước)' : 'Current layout (Before)'}</CardTitle>}
           description={beforePlace || undefined}
           sx={{ borderTop: `3px solid ${MAP.relocFrom}` }}
         >
           <Stack spacing={1} data-testid="reloc-before-card">
-            <Stack spacing={0.75} sx={{ minHeight: { lg: MAP_INFO_MIN_H } }}>
+            <Stack spacing={0.75} sx={{ minHeight: { lg: beforeLayout && afterLayout ? MAP_INFO_MIN_H : 0 } }}>
               {sourceChips.length > 0 && (
                 <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap' }} role="list" aria-label={vi ? 'Vị trí nguồn' : 'Source locations'}>
                   {sourceChips.map((text) => (
@@ -457,11 +498,11 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
                 {...mapProps}
               />
             ) : (
-              <Typography variant="body2" color="text.secondary">
+              <MapEmpty testId="reloc-before-empty">
                 {draft.selected.length
                   ? vi ? 'Máy đã chọn không nằm trên sơ đồ nào.' : 'Selected machines are not on any layout.'
                   : vi ? 'Chưa chọn máy. Chọn toà và zone ở trên để duyệt máy theo zone.' : 'No machine selected. Pick a building and zone above to browse machines.'}
-              </Typography>
+              </MapEmpty>
             )}
           </Stack>
         </SectionCard>
@@ -471,7 +512,7 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
           sx={afterBorder ? { border: afterBorder } : undefined}
         >
           <Stack spacing={1} data-testid="reloc-after-card" data-move={moveKind}>
-            <Stack spacing={0.75} sx={{ minHeight: { lg: MAP_INFO_MIN_H } }}>
+            <Stack spacing={0.75} sx={{ minHeight: { lg: beforeLayout && afterLayout ? MAP_INFO_MIN_H : 0 } }}>
               {cross && target && (
                 <Box
                   role="status"
@@ -490,14 +531,14 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
               role="after"
               rows={draft.selectedRows}
               target={draft.target}
-              onPickZone={pickOnMap}
+              onPickZone={onPickZone}
               zoneCount={zoneCount}
-              isPickable={(code) => isCatalogTarget(catalog, afterLayout.id, code)}
-              extraTray={catalogTray(catalog, afterLayout.id)}
+              isPickable={afterPickable}
+              extraTray={afterTray}
               {...mapProps}
             />
           ) : (
-            <Typography variant="body2" color="text.secondary">{vi ? 'Chọn toà nhà và tầng đích.' : 'Pick the destination building and floor.'}</Typography>
+            <MapEmpty testId="reloc-after-empty">{vi ? 'Chọn toà nhà và tầng đích.' : 'Pick the destination building and floor.'}</MapEmpty>
           )}
           </Stack>
         </SectionCard>
@@ -518,19 +559,27 @@ function RelocationWorkspace({ lang, rows, locations }: { lang: Lang; rows: read
         )}
       </Box>
 
-      {/* Summary + request details side by side (11fr / 9fr) from lg, stacked below; equal heights. */}
-      <Box sx={{ display: 'grid', gap: density.gap, alignItems: 'stretch', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 11fr) minmax(0, 9fr)' } }}>
-        <SectionCard title={vi ? '3. Tóm tắt' : '3. Summary'} sx={{ height: '100%' }}>
+      {/* Summary + request details side by side (11fr / 9fr) from lg, stacked below; equal heights only when the summary has content. */}
+      <Box data-testid="reloc-row-summary" data-align={rowAlign} sx={{ display: 'grid', gap: density.gap, alignItems: rowAlign, gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 11fr) minmax(0, 9fr)' } }}>
+        <SectionCard title={vi ? '3. Tóm tắt' : '3. Summary'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
           <RelocationSummary lang={lang} rows={draft.selectedRows} target={draft.target} zoneCount={zoneCount} ctx={ctx} />
         </SectionCard>
 
-        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={{ height: '100%' }}>
-          <RelocationForm lang={lang} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} />
+        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
+          <RelocationForm lang={lang} account={account} requesterName={user?.name ?? null} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} />
         </SectionCard>
       </Box>
 
-      <SectionCard title={vi ? 'Yêu cầu đã gửi' : 'Submitted requests'}>
-        <RelocationRequestsTable lang={lang} requests={requests} loading={loading} onReupload={(r) => void reupload(r)} uploading={tableUploads} />
+      <SectionCard
+        title={vi ? 'Yêu cầu đã gửi' : 'Submitted requests'}
+        actions={
+          <FormControlLabel
+            control={<Switch size="small" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} />}
+            label={<Typography variant="body2">{vi ? 'Chỉ yêu cầu của tôi' : 'Only my requests'}</Typography>}
+          />
+        }
+      >
+        <RelocationRequestsTable lang={lang} requests={mineOnly ? requests.filter(isMine) : requests} loading={loading} onReupload={(r) => void reupload(r)} uploading={tableUploads} />
       </SectionCard>
     </Stack>
   )

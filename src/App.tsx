@@ -1,5 +1,8 @@
-import { Box } from '@mui/material'
+import { Box, type PaletteMode } from '@mui/material'
 import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AuthProvider } from './auth/AuthProvider'
+import { useAuth } from './auth/authContext'
+import { LoginPage } from './components/auth/LoginPage'
 import { ErrorState, LoadingState } from './components/common/States'
 import { DashboardTabs, tabId, tabPanelId } from './components/dashboard/DashboardTabs'
 import { Header } from './components/dashboard/Header'
@@ -12,7 +15,7 @@ import { useFixedAssets } from './hooks/useFixedAssets'
 import { useLanguage } from './hooks/useLanguage'
 import { useThemeMode } from './hooks/useThemeMode'
 import { AppLayout } from './layout/AppLayout'
-import type { AppTab } from './types/fixedAsset'
+import type { AppTab, Lang } from './types/fixedAsset'
 import { issueKinds } from './utils/fixedAsset'
 import { density } from './theme/density'
 
@@ -39,7 +42,7 @@ const RelocationTab = lazy(loadRelocationTab)
 function prefetchTabModules(): () => void {
   const run = () => {
     // A failed prefetch is harmless; the real lazy() import retries when the tab is opened.
-    for (const load of [loadAssetTable, loadIssuesTab, loadForecastTab, loadRelocationTab]) load().catch(() => {})
+    for (const load of [loadAssetTable, loadIssuesTab, loadForecastTab, loadRelocationTab]) load().catch(() => { })
   }
   if (typeof window.requestIdleCallback === 'function') {
     const id = window.requestIdleCallback(run, { timeout: 3000 })
@@ -74,9 +77,40 @@ const TabPanel = memo(
   (prev, next) => !prev.active && !next.active,
 )
 
+interface Shell {
+  lang: Lang
+  setLang: (lang: Lang) => void
+  mode: PaletteMode
+  toggleMode: () => void
+}
+
+/** Session cookie auth: GET /api/auth/me first; the dashboard (and its /api calls) only mounts once logged in. */
 export function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
+  )
+}
+
+function AuthGate() {
   const { mode, toggleMode } = useThemeMode()
   const { lang, setLang } = useLanguage('vi')
+  const auth = useAuth()
+  const shell = { lang, setLang, mode, toggleMode }
+  if (auth.status === 'authenticated' && auth.account) return <Dashboard {...shell} account={auth.account} onLogout={auth.logout} />
+  return (
+    <AppLayout mode={mode} header={null}>
+      {auth.status === 'checking' ? (
+        <LoadingState label={lang === 'vi' ? 'Đang kiểm tra phiên đăng nhập...' : 'Checking your session...'} />
+      ) : (
+        <LoginPage lang={lang} mode={mode} onChangeLang={setLang} onToggleTheme={toggleMode} onLogin={auth.login} />
+      )}
+    </AppLayout>
+  )
+}
+
+function Dashboard({ lang, setLang, mode, toggleMode, account, onLogout }: Shell & { account: string; onLogout: () => Promise<void> }) {
   const { data, status, busy, hasLoaded, reload, upload, importFromUrl } = useFixedAssets()
   const { filters, setFilters, filteredRows, resetFilters } = useAssetFilters(data.tableData)
   const [tab, setTab] = useState<AppTab>('overview')
@@ -109,7 +143,7 @@ export function App() {
       case 'table': return <AssetTable rows={tabRows} lang={lang} />
       case 'map': return <MapTab rows={tabRows} lang={lang} />
       // Relocation loads its own data from the location API.
-      case 'relocation': return <RelocationTab lang={lang} />
+      case 'relocation': return <RelocationTab lang={lang} account={account} />
       case 'issues': return <IssuesTab rows={tabRows} lang={lang} />
       case 'forecast': return <ForecastTab rows={tabRows} lang={lang} />
       default: return null
@@ -129,10 +163,12 @@ export function App() {
           onRefresh={reload}
           onChangeLang={setLang}
           onToggleTheme={toggleMode}
+          account={account}
+          onLogout={onLogout}
         />
       }
     >
-      <UploadBar
+      {/* <UploadBar
         lang={lang}
         status={status}
         lastImport={data.lastImport}
@@ -140,9 +176,9 @@ export function App() {
         busy={busy}
         onUpload={upload}
         onLoadUrl={importFromUrl}
-      />
+      /> */}
 
-      <SummaryCards rows={filteredRows} totalRows={data.tableData.length} flaggedCount={flaggedCount} lang={lang} loading={initialLoading} />
+      <SummaryCards rows={filteredRows} totalRows={data.tableData.length} flaggedCount={flaggedCount} lang={lang} loading={initialLoading} onOpenIssues={() => changeTab('issues')} />
 
       <FilterBar
         lang={lang}

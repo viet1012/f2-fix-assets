@@ -1,4 +1,5 @@
 import { alpha, Box, FormControlLabel, Stack, Switch, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material'
+import ViewInArOutlined from '@mui/icons-material/ViewInArOutlined'
 import type { MapViewSettings } from '../../hooks/useMapViewSettings'
 import type { Lang } from '../../types/fixedAsset'
 import { glassFloating, glassRadius } from '../../theme/liquidGlass'
@@ -52,6 +53,15 @@ export function RelocationMapToolbar({ lang, settings, onChange }: Props) {
       <FormControlLabel
         control={<Switch size="small" checked={settings.syncZoom} onChange={(e) => onChange({ syncZoom: e.target.checked })} />}
         label={<Typography variant="body2">{vi ? 'Đồng bộ zoom' : 'Sync zoom'}</Typography>}
+      />
+      <FormControlLabel
+        control={<Switch size="small" checked={settings.image3d} onChange={(e) => onChange({ image3d: e.target.checked })} />}
+        label={
+          <Stack direction="row" spacing={0.5} component="span" sx={{ alignItems: 'center' }}>
+            <ViewInArOutlined fontSize="small" aria-hidden sx={{ color: 'text.secondary' }} />
+            <Typography variant="body2" component="span">{vi ? 'Ảnh 3D' : '3D drawing'}</Typography>
+          </Stack>
+        }
       />
       <Box sx={{ flex: 1, display: { xs: 'none', md: 'block' } }} />
       <Stack direction="row" spacing={1.5} useFlexGap sx={{ flexWrap: 'wrap' }} aria-label={vi ? 'Chú giải' : 'Legend'} data-testid="reloc-legend">

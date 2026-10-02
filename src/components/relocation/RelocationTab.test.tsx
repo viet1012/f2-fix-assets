@@ -44,6 +44,12 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/**
+ * Tests that paste machines and then drive both full floor maps (Before + After re-render on every selection change):
+ * fast alone, but slower than the 5s default when the whole suite runs in parallel on a loaded machine.
+ */
+const HEAVY_TEST_MS = 20000
+
 const pasteCodes = (text: string) => {
   const input = screen.getByLabelText('Chọn máy')
   fireEvent.paste(input, { clipboardData: { getData: () => text } })
@@ -52,7 +58,7 @@ const pasteCodes = (text: string) => {
 describe('RelocationTab with the location API', () => {
   it('fetches the Factory 2 scope; NONE assets go to the tray, floorMismatch shows a warning icon', async () => {
     const fetchMock = mockFetch()
-    const { container } = render(<RelocationTab lang="vi" />)
+    const { container } = render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     const urls = fetchMock.mock.calls.map(([u]) => String(u))
     expect(urls.some((u) => u.endsWith('/api/assets/with-location?factory=Factory+2'))).toBe(true)
@@ -71,7 +77,7 @@ describe('RelocationTab with the location API', () => {
 
   it('rejects a machine at an Outside location with its own message', async () => {
     mockFetch()
-    const { container } = render(<RelocationTab lang="vi" />)
+    const { container } = render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-900-1')
     expect(container.querySelector('[data-report="outside"]')?.textContent).toContain('A-900-1')
@@ -80,10 +86,10 @@ describe('RelocationTab with the location API', () => {
 
   it('fetches once per session across remounts', async () => {
     const fetchMock = mockFetch()
-    const first = render(<RelocationTab lang="vi" />)
+    const first = render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     first.unmount()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     // Location data is cached; the request list is reloaded on each mount.
     expect(fetchMock.mock.calls.filter(([u]) => !String(u).includes('/api/relocation-requests'))).toHaveLength(2)
@@ -91,7 +97,7 @@ describe('RelocationTab with the location API', () => {
 
   it('shows an error with a retry button instead of static data, and recovers on retry', async () => {
     const fetchMock = mockFetch(true)
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     expect(await screen.findByText('Không tải được dữ liệu vị trí')).toBeTruthy()
     expect(screen.getByText('DB offline')).toBeTruthy()
     expect(screen.queryByLabelText('Chọn máy')).toBeNull()
@@ -104,7 +110,7 @@ describe('RelocationTab with the location API', () => {
 
   it('error state is localized (en)', async () => {
     mockFetch(true)
-    render(<RelocationTab lang="en" />)
+    render(<RelocationTab lang="en" account="E001" />)
     expect(await screen.findByText('Could not load location data')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
   })
@@ -126,7 +132,7 @@ describe('RelocationTab - browse by zone', () => {
 
   it('opens the zone list from the Before map; "Select all" adds only selectable machines', async () => {
     mockFetch()
-    const { container } = render(<RelocationTab lang="vi" />)
+    const { container } = render(<RelocationTab lang="vi" account="E001" />)
     const zoneEl = await openA23(container)
     expect(zoneEl.getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText(/Đã chọn/).textContent).toContain('2 máy từ 2 zone')
@@ -143,7 +149,7 @@ describe('RelocationTab - browse by zone', () => {
 
   it('checkboxes stay in sync with the selected list both ways', async () => {
     mockFetch()
-    const { container } = render(<RelocationTab lang="vi" />)
+    const { container } = render(<RelocationTab lang="vi" account="E001" />)
     await openA23(container)
     fireEvent.click(screen.getByRole('button', { name: 'Xoá A-006-1' }))
     expect(box('A-006-1').checked).toBe(false)
@@ -152,7 +158,7 @@ describe('RelocationTab - browse by zone', () => {
     fireEvent.click(list().getByRole('button', { name: 'Bỏ chọn' }))
     expect(screen.queryByRole('button', { name: 'Xoá A-006-1' })).toBeNull()
     expect(selectedCount()).toBe('1')
-  })
+  }, HEAVY_TEST_MS)
 
   it('machines in an open request and wrong-kind machines are disabled and cannot be selected', async () => {
     mockFetch(false, [
@@ -162,7 +168,7 @@ describe('RelocationTab - browse by zone', () => {
         items: [{ machineCode: 'A-006-2', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, status: 'REQ_PENDING' }],
       },
     ])
-    const { container } = render(<RelocationTab lang="vi" />)
+    const { container } = render(<RelocationTab lang="vi" account="E001" />)
     await openA23(container)
     await waitFor(() => expect(item('A-006-2').getAttribute('data-reason')).toBe('pending'))
     // Submitted requests table: RequestNo and translated status.
@@ -179,7 +185,7 @@ describe('RelocationTab - browse by zone', () => {
 describe('RelocationTab - highlight from the selected table', () => {
   it('hovering a selected row flashes its zone on the map', async () => {
     mockFetch()
-    const { container } = render(<RelocationTab lang="vi" />)
+    const { container } = render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-007-1')
     const row = container.querySelector<HTMLElement>('tr[data-code="A-006-1"]')!
@@ -203,7 +209,7 @@ describe('RelocationTab - map cards', () => {
 
   it('headers: colour square, bold title, "Toà / floor" subtitle; Before card has an amber top border', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-007-1')
     const before = cardOf(screen.getByTestId('reloc-before-card'))
@@ -216,7 +222,7 @@ describe('RelocationTab - map cards', () => {
 
   it('Before card header: one light amber chip per unique source location', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2 A-015-1')
     const chips = [...cardOf(screen.getByTestId('reloc-before-card')).querySelectorAll<HTMLElement>('.reloc-source-chip')]
@@ -228,7 +234,7 @@ describe('RelocationTab - map cards', () => {
 
   it('layout pills when the selection spans several layouts; the active one is solid amber', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-015-1')
     expect(screen.getByText('Máy đã chọn nằm ở nhiều tầng:')).toBeTruthy()
@@ -241,9 +247,34 @@ describe('RelocationTab - map cards', () => {
     expect(within(cardOf(screen.getByTestId('reloc-before-card'))).getByText('Toà B / 1F')).toBeTruthy()
   })
 
+  it('empty: compact Before/After empty states (no tall frame) and rows aligned to start; stretch once both sides have content', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    for (const id of ['reloc-before-empty', 'reloc-after-empty']) {
+      const el = screen.getByTestId(id)
+      expect(getComputedStyle(el).maxHeight).toBe('96px')
+      expect(getComputedStyle(el).minHeight === '' || getComputedStyle(el).minHeight === '0px' || getComputedStyle(el).minHeight === 'auto').toBe(true)
+    }
+    // The info row above an empty map reserves no height.
+    expect(getComputedStyle(screen.getByTestId('reloc-before-empty').previousElementSibling as HTMLElement).minHeight).not.toBe('76px')
+    expect(screen.getByTestId('reloc-row-pick').getAttribute('data-align')).toBe('start')
+    expect(screen.getByTestId('reloc-row-summary').getAttribute('data-align')).toBe('start')
+    expect(getComputedStyle(screen.getByTestId('reloc-row-pick')).alignItems).toBe('start')
+    expect(screen.getByText('Chọn máy và vị trí đích để xem tóm tắt.')).toBeTruthy()
+
+    pasteCodes('A-006-1 A-006-2')
+    expect(screen.getByTestId('reloc-row-pick').getAttribute('data-align')).toBe('start')
+    pickTarget('Toà A', '1F · Press', 'A1-1')
+    expect(screen.getByTestId('reloc-route')).toBeTruthy()
+    expect(screen.getByTestId('reloc-row-pick').getAttribute('data-align')).toBe('stretch')
+    expect(screen.getByTestId('reloc-row-summary').getAttribute('data-align')).toBe('stretch')
+    expect(screen.queryByTestId('reloc-after-empty')).toBeNull()
+  }, HEAVY_TEST_MS)
+
   it('same floor: green After border, route line with a light "Cùng tầng" badge, no banner', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
     pickTarget('Toà A', '1F · Press', 'A1-1')
@@ -257,7 +288,7 @@ describe('RelocationTab - map cards', () => {
 
   it('building change: purple banner and border, solid "Đổi toà" badge', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
     pickTarget('Toà B', '1F · Guide', 'A15-3')
@@ -271,7 +302,7 @@ describe('RelocationTab - map cards', () => {
 
   it('summary: one "Từ → Đến" column and a purple (not red) "Đổi toà" badge', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
     pickTarget('Toà B', '1F · Guide', 'A15-3')
@@ -285,7 +316,7 @@ describe('RelocationTab - map cards', () => {
 
   it('legend: current, old, new, other building', async () => {
     mockFetch()
-    render(<RelocationTab lang="en" />)
+    render(<RelocationTab lang="en" account="E001" />)
     await screen.findByLabelText('Pick machines')
     expect(screen.getByTestId('reloc-legend').textContent).toBe('Current locationOld locationNew locationFrom/To another building')
   })
@@ -294,7 +325,7 @@ describe('RelocationTab - map cards', () => {
 describe('RelocationTab - pick + destination row', () => {
   it('"✓ added" note next to the hint, hidden again after 3s; errors stay as alerts', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     vi.useFakeTimers()
     try {
@@ -315,7 +346,7 @@ describe('RelocationTab - pick + destination row', () => {
 
   it('selection summary and "Remove all" live in the card header; the table has no asset-type column', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-007-1')
     const header = screen.getByTestId('selected-count').closest('.MuiCard-root')!.firstElementChild!
@@ -327,7 +358,7 @@ describe('RelocationTab - pick + destination row', () => {
 
   it('floor options read "1F · Press", zone options "A1-1 · 26 máy"', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
@@ -342,7 +373,7 @@ describe('RelocationTab - pick + destination row', () => {
 
   it('the destination card shows the route "N máy → Toà / floor / zone" with move badges', async () => {
     mockFetch()
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
     expect(screen.queryByTestId('target-route')).toBeNull()
@@ -420,7 +451,6 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
     fireEvent.click(screen.getByRole('option', { name: '1F · Press' }))
     fireEvent.click(screen.getByTestId('reloc-after-card').querySelector('.reloc-zone[data-zone="A1-1"]')!)
-    fireEvent.change(screen.getByLabelText(/Mã nhân viên/), { target: { value: 'E001' } })
     fireEvent.change(screen.getByLabelText(/Ngày dự kiến/), { target: { value: today } })
     fireEvent.change(screen.getByLabelText(/Ngày hoàn thành/), { target: { value: today } })
     fireEvent.change(screen.getByLabelText(/Lý do/), { target: { value: 'Re-layout' } })
@@ -435,7 +465,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
 
   it('success: posts the date strings, resets form and selection, exports + uploads the PNG, links the file, reloads the table', async () => {
     const fetchMock = mockSubmit(created201)
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await fillAndSubmit()
     await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('saved'))
     expect(banner().textContent).toContain('Đã tạo RL-2026-0001 (1 máy)')
@@ -443,11 +473,18 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     expect(banner().textContent).toContain('A-006-2')
     expect(screen.getByTestId('reloc-drawing-link').getAttribute('href')).toBe(DRAWING_URL)
     const post = fetchMock.mock.calls.find(([u, init]) => String(u).endsWith('/api/relocation-requests') && init?.method === 'POST')!
-    expect(JSON.parse(String(post[1]!.body))).toMatchObject({ plannedMoveDate: today, plannedDoneDate: today, requestedBy: 'E001' })
+    const body = JSON.parse(String(post[1]!.body))
+    expect(body).toMatchObject({ plannedMoveDate: today, plannedDoneDate: today })
+    // The requester is the session account: never sent.
+    expect(body).not.toHaveProperty('requestedBy')
+    expect(post[1]!.credentials).toBe('include')
+    expect(screen.getByTestId('reloc-requester').textContent).toContain('E001')
     // The PNG is built from the snapshot taken before the reset: the machine written by the API, its target.
     expect(exportRelocationPng).toHaveBeenCalledTimes(1)
     const input = vi.mocked(exportRelocationPng).mock.calls[0][0]
     expect(input.request.id).toBe('RL-2026-0001')
+    // PNG "Requested by" = the session account.
+    expect(input.request.requestedBy).toBe('E001')
     expect(input.rows.map((r) => r.code)).toEqual(['A-006-1'])
     expect(input.target).toEqual({ layoutId: 'floor1', zone: 'A1-1' })
     expect(input.beforeLayout?.id).toBe('floor1')
@@ -458,7 +495,6 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     expect(file.name).toBe('RL-2026-0001.png')
     expect(screen.getByTestId('selected-count').textContent).toBe('0')
     expect((screen.getByLabelText(/Ngày dự kiến/) as HTMLInputElement).value).toBe('')
-    expect((screen.getByLabelText(/Mã nhân viên/) as HTMLInputElement).value).toBe('')
     const table = screen.getByRole('table', { name: 'Yêu cầu đã gửi' })
     expect(within(table).getAllByText(`${today.slice(8, 10)}/${today.slice(5, 7)}/${today.slice(0, 4)}`)).toHaveLength(2)
     await waitFor(() => expect(within(table).getByTestId('drawing-link-RL-2026-0001').getAttribute('href')).toBe(DRAWING_URL))
@@ -469,7 +505,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
   it('upload failure: the request stays, "chưa lưu được bản vẽ" + retry, which uploads the same PNG again', async () => {
     let fail = true
     const fetchMock = mockSubmit(created201, () => (fail ? json({ error: 'Storage offline' }, 503) : drawingOk()))
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await fillAndSubmit()
     await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('failed'))
     expect(banner().textContent).toContain('Đã tạo RL-2026-0001 nhưng chưa lưu được bản vẽ')
@@ -487,7 +523,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
 
   it('"Tải PNG về máy" downloads the PNG of the request', async () => {
     mockSubmit(created201, () => json({ error: 'Storage offline' }, 503))
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await fillAndSubmit()
     await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('failed'))
     fireEvent.click(within(banner()).getByRole('button', { name: 'Tải PNG về máy' }))
@@ -509,7 +545,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
       items: [{ machineCode: 'A-006-1', from: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, to: { positionA: 'A3', positionAA: 'A3-1', positionAAA: null }, status: 'REQ_PENDING' }],
     }
     const fetchMock = mockSubmit(created201, drawingOk, [apiReq(null)], detail)
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
     fireEvent.click(within(table).getByRole('button', { name: 'Tải lên lại' }))
     await waitFor(() => expect(within(table).getByTestId('drawing-link-RL-2026-0001')).toBeTruthy())
@@ -527,7 +563,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
   it('table "Tải lên lại": spinner + "Đang tạo bản vẽ…" while building, repeated clicks ignored', async () => {
     let release: () => void = () => {}
     const fetchMock = mockSubmit(created201, () => new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ fileName: 'RL-2026-0001.png', webUrl: DRAWING_URL }), { status: 200, headers: { 'Content-Type': 'application/json' } })) }), [apiReq(null)])
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
     const button = within(table).getByRole('button', { name: 'Tải lên lại' })
     fireEvent.click(button)
@@ -542,9 +578,27 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     expect(exportRelocationPng).toHaveBeenCalledTimes(1)
   })
 
+  it('"Chỉ yêu cầu của tôi" keeps only the requests of the logged-in account', async () => {
+    mockSubmit(created201, drawingOk, [apiReq(null), { ...apiReq(null), requestNo: 'RL-2026-0002', requestedBy: 'E999' }])
+    render(<RelocationTab lang="vi" account="e001" />)
+    const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
+    expect(within(table).getByText('RL-2026-0002')).toBeTruthy()
+    fireEvent.click(screen.getByRole('switch', { name: 'Chỉ yêu cầu của tôi' }))
+    expect(within(table).getByText('RL-2026-0001')).toBeTruthy()
+    expect(within(table).queryByText('RL-2026-0002')).toBeNull()
+  })
+
+  it('re-upload answered 403: "Chỉ người tạo mới được tải lên lại"', async () => {
+    mockSubmit(created201, () => json({ error: 'Forbidden' }, 403), [{ ...apiReq(null), requestedBy: 'E999' }])
+    render(<RelocationTab lang="vi" account="E001" />)
+    const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
+    fireEvent.click(within(table).getByRole('button', { name: 'Tải lên lại' }))
+    expect(await screen.findByText('Chỉ người tạo mới được tải lên lại')).toBeTruthy()
+  })
+
   it('409: the machines in codes are marked red in the selected table; the selection is kept', async () => {
     mockSubmit(() => json({ error: 'conflict', codes: ['A-006-2'] }, 409))
-    render(<RelocationTab lang="vi" />)
+    render(<RelocationTab lang="vi" account="E001" />)
     await fillAndSubmit()
     await screen.findByText('Máy đang có yêu cầu di dời chưa xử lý: A-006-2')
     const table = screen.getByRole('table', { name: 'Máy đã chọn' })

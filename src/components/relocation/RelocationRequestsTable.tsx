@@ -1,6 +1,7 @@
 import { Button, Chip, CircularProgress, type ChipProps, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
 import ImageOutlined from '@mui/icons-material/ImageOutlined'
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded'
+import { displayName } from '../../api/authApi'
 import type { Lang } from '../../types/fixedAsset'
 import { isKnownRelocationStatus, relocationStatusLabel } from '../../config/relocation'
 import type { RelocationRequest, RelocationStatus } from '../../types/relocation'
@@ -94,7 +95,7 @@ export function RelocationRequestsTable({ lang, requests, loading = false, onReu
               <TableCell>{r.id}</TableCell>
               <TableCell title={r.items.map((i) => i.code).join(', ')}>{r.items.length}</TableCell>
               <TableCell>{r.to.zone}</TableCell>
-              <TableCell>{r.requestedBy}</TableCell>
+              <TableCell>{`${displayName(r.requesterName, lang)} (${r.requestedBy})`}</TableCell>
               <TableCell>{formatRequestDate(r.plannedMoveDate, vi)}</TableCell>
               <TableCell>{formatRequestDate(r.plannedDoneDate, vi)}</TableCell>
               <TableCell sx={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.reason || '-'}</TableCell>

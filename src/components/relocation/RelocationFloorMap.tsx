@@ -1,5 +1,5 @@
 import { alpha, Box, Stack, Typography, useTheme } from '@mui/material'
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { memo, useMemo, useState, type KeyboardEvent } from 'react'
 import { facLabel } from '../../config/relocation'
 import { FLOORS, type LayoutId, type MapArea } from '../../data/mapData'
 import type { Lang } from '../../types/fixedAsset'
@@ -9,12 +9,14 @@ import { tokens, zonePalette } from '../../theme/palette'
 import { glassRadius, px } from '../../theme/liquidGlass'
 import { buildIndexes, buildTray, DEFAULT_CONTEXT, groupByLayoutZone, movers, type RelocationContext, type RelocationRow, type TrayZone, rowFac, targetFac } from '../../utils/relocation'
 import { majorZone } from '../../utils/zone'
-import { MapScene, sceneRotation, uprightTransform, type MapView } from '../map/MapScene'
+import { MapScene, sceneRotation, uprightTransform, type MapView, type ScrollSyncGroup } from '../map/MapScene'
 
 export interface RelocationLayout {
   id: LayoutId
   title: string
   imageData: string
+  /** "3D look" drawing of the same size (scripts/make3dMaps.py); never used by the PNG export. */
+  imageData3d?: string
   imgW: number
   imgH: number
   rotationDeg?: number
@@ -57,9 +59,13 @@ interface Props {
   showAll?: boolean
   /** Machine count in the zone labels ("A6-1 · 26"). */
   showCounts?: boolean
+  /** Show the "3D look" drawing (layout.imageData3d) instead of the original; ignored by exportMode. */
+  use3d?: boolean
   /** Controlled zoom/scroll, e.g. shared with the other map. */
   view?: MapView
   onViewChange?: (view: MapView) => void
+  /** Live scroll sync with the other map (no React state while scrolling). */
+  scrollSync?: ScrollSyncGroup
   /** Frame aspect ratio; both maps use the same one so their frames are equal. */
   frameRatio?: string
   /** All layouts, used to describe a destination/source on another layout. */
@@ -86,8 +92,12 @@ export const AMBER = { base: MAP.relocFrom, ink: '#92400e', paper: '#fef3c7' } a
 export const FOCUS = {
   /** Layout image opacity (always grayscale): no machine selected / focus mode. */
   image: { idle: 0.6, focus: 0.5 },
+  /** The 3D drawing is already light (slate on #f8fafc): one opacity, idle and focus. */
+  image3d: 0.85,
   /** Normal zone fill; majors with sub-zones stay lighter so their sub-zones do not get a double tint. */
   zoneFill: 0.14,
+  /** Normal zone fill over the (already tinted) 3D drawing; from / to / old keep their own fills. */
+  zoneFill3d: 0.08,
   majorFill: 0.05,
   dim: { fill: 0.06, strokeWidth: 1, strokeOpacity: 0.45, chipOpacity: 0.6, majorChipOpacity: 0.55 },
   parent: { strokeWidth: 2 },
@@ -397,7 +407,7 @@ function useLayoutGeometry(layout: RelocationLayout) {
   }, [layout])
 }
 
-export function RelocationFloorMap({
+function RelocationFloorMapImpl({
   lang,
   layout,
   role,
@@ -412,8 +422,10 @@ export function RelocationFloorMap({
   extraTray = [],
   showAll = true,
   showCounts = true,
+  use3d = false,
   view,
   onViewChange,
+  scrollSync,
   frameRatio = '16 / 10',
   layouts = FLOORS,
   ctx = DEFAULT_CONTEXT,
@@ -596,7 +608,9 @@ export function RelocationFloorMap({
     const c = vis.map(centers.get(p.code)!)
     boxes.push({ id: `pin:${p.code}`, kind: 'pin', dir: -1, spread: p.kind === 'old', x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h, ...size })
   }
-  const placedLabels = layoutLabels(boxes, vis.bounds, 2, FOCUS.labelTries)
+  const boxesKey = JSON.stringify(boxes)
+  // Dependency = the content of `boxes` (rebuilt each render), not its identity.
+  const placedLabels = useMemo(() => layoutLabels(boxes, vis.bounds, 2, FOCUS.labelTries), [boxesKey, vis.bounds.w, vis.bounds.h])
   /** Transform putting a label anchored at scene point `at` to its placed on-screen position. */
   const placedTransform = (id: string, at: { x: number; y: number }) => {
     const pl = placedLabels.get(id)
@@ -605,6 +619,7 @@ export function RelocationFloorMap({
     return { hidden: pl.hidden, transform: `${upright} translate(${(pl.x - a.x).toFixed(1)}px, ${(pl.y - a.y).toFixed(1)}px)`.trim() }
   }
 
+  const drawing3d = use3d && !!layout.imageData3d
   if (exportMode) {
     return (
       <ExportSvg
@@ -639,18 +654,21 @@ export function RelocationFloorMap({
         <MapScene
           lang={lang}
           title={layout.title}
-          imageData={layout.imageData}
+          imageData={drawing3d ? layout.imageData3d! : layout.imageData}
           imgW={layout.imgW}
           imgH={layout.imgH}
           rotationDeg={layout.rotationDeg}
           fit="contain"
           view={view}
           onViewChange={onViewChange}
+          scrollSync={scrollSync}
           onSceneWidth={setSceneW}
           svgProps={{ className: 'reloc-svg', ...(interactive ? { role: 'group', 'aria-label': layout.title } : { 'aria-hidden': true, focusable: 'false' }) }}
           sceneSx={{
             // The drawing recedes (grey, lighter; more in focus mode) so the coloured zones carry the information.
-            '& > img': { filter: 'grayscale(1)', opacity: focus ? FOCUS.image.focus : FOCUS.image.idle, transition: `opacity ${FOCUS.transitionMs}ms` },
+            // The 3D drawing is already slate-toned: no grayscale, same opacity.
+            // willChange: the filtered drawing gets its own layer, so scrolling does not re-run the filter.
+            '& > img': { willChange: 'transform', filter: drawing3d ? 'none' : 'grayscale(1)', opacity: drawing3d ? FOCUS.image3d : focus ? FOCUS.image.focus : FOCUS.image.idle, transition: `opacity ${FOCUS.transitionMs}ms` },
             '& .reloc-svg': { pointerEvents: 'none' },
             '& .reloc-zone': {
               strokeLinejoin: 'round',
@@ -775,7 +793,7 @@ export function RelocationFloorMap({
                   className,
                   'data-zone': s.code,
                   'data-state': state,
-                  fill: alpha(s.color, s.major && hasSubs(s.code) ? FOCUS.majorFill : FOCUS.zoneFill),
+                  fill: alpha(s.color, s.major && hasSubs(s.code) ? FOCUS.majorFill : drawing3d ? FOCUS.zoneFill3d : FOCUS.zoneFill),
                   stroke: s.color,
                   vectorEffect: 'non-scaling-stroke',
                   ...(pickable ? pickProps(s.code, state) : {}),
@@ -1047,3 +1065,6 @@ function ExportSvg({ exportMode, layout, vis, W, H, focus, layers, states, relat
     </svg>
   )
 }
+
+/** Memoised: re-renders only when its props change (never while scrolling; see MapScene). */
+export const RelocationFloorMap = memo(RelocationFloorMapImpl)

@@ -1,5 +1,5 @@
 import type { AssetLocation, AssetLocationFilters, LocationFilters, LocationZone } from '../types/location'
-import { API_BASE_URL, readJson } from './fixedAssetApi'
+import { API_BASE_URL, apiFetch, readJson } from './fixedAssetApi'
 
 function query(params: object) {
   const search = new URLSearchParams()
@@ -11,17 +11,17 @@ function query(params: object) {
 }
 
 export async function fetchLocations(filters: LocationFilters = {}): Promise<LocationZone[]> {
-  const response = await fetch(`${API_BASE_URL}/api/locations${query(filters)}`)
+  const response = await apiFetch(`${API_BASE_URL}/api/locations${query(filters)}`)
   return readJson<LocationZone[]>(response)
 }
 
 export async function fetchAssetsWithLocation(filters: AssetLocationFilters = {}): Promise<AssetLocation[]> {
-  const response = await fetch(`${API_BASE_URL}/api/assets/with-location${query(filters)}`)
+  const response = await apiFetch(`${API_BASE_URL}/api/assets/with-location${query(filters)}`)
   return readJson<AssetLocation[]>(response)
 }
 
 /** Rejects with the API's `error` message (e.g. 404 for an unknown code). */
 export async function fetchAssetLocation(code: string): Promise<AssetLocation> {
-  const response = await fetch(`${API_BASE_URL}/api/assets/${encodeURIComponent(code)}/location`)
+  const response = await apiFetch(`${API_BASE_URL}/api/assets/${encodeURIComponent(code)}/location`)
   return readJson<AssetLocation>(response)
 }

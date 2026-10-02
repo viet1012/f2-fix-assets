@@ -35,6 +35,8 @@ export interface RelocationRequest {
   /** layoutId is null when the zone is not drawn on any layout. */
   to: { layoutId: LayoutId | null; zone: string }
   requestedBy: string
+  /** Requester's name (API requesterName); null/absent when unknown. */
+  requesterName?: string | null
   plannedMoveDate: string
   plannedDoneDate: string
   reason: string

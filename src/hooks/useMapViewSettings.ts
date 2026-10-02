@@ -6,9 +6,11 @@ export interface MapViewSettings {
   showCounts: boolean
   /** Before and After maps share zoom and scroll. */
   syncZoom: boolean
+  /** "3D look" drawings instead of the originals (off by default). */
+  image3d: boolean
 }
 
-export const DEFAULT_MAP_SETTINGS: MapViewSettings = { showAll: true, showCounts: true, syncZoom: true }
+export const DEFAULT_MAP_SETTINGS: MapViewSettings = { showAll: true, showCounts: true, syncZoom: true, image3d: false }
 const STORAGE_KEY = 'f2.relocation.mapView'
 
 function read(): MapViewSettings {

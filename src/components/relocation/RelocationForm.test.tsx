@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_FORM, todayIso, type RelocationFormValues } from '../../utils/relocationForm'
 import { RelocationForm } from './RelocationForm'
 
-function Harness({ onSubmit, initial = EMPTY_FORM, lang = 'vi' as const }: { onSubmit: (v: RelocationFormValues) => void; initial?: RelocationFormValues; lang?: 'vi' | 'en' }) {
+function Harness({ onSubmit, initial = EMPTY_FORM, lang = 'vi' as const, requesterName = null }: { onSubmit: (v: RelocationFormValues) => void; initial?: RelocationFormValues; lang?: 'vi' | 'en'; requesterName?: string | null }) {
   const [value, setValue] = useState(initial)
-  return <RelocationForm lang={lang} value={value} onChange={setValue} moverCount={2} onSubmit={onSubmit} />
+  return <RelocationForm lang={lang} account="viet.ta" requesterName={requesterName} value={value} onChange={setValue} moverCount={2} onSubmit={onSubmit} />
 }
 
 afterEach(cleanup)
@@ -17,14 +17,14 @@ describe('RelocationForm', () => {
     const onSubmit = vi.fn()
     render(<Harness onSubmit={onSubmit} />)
     fireEvent.click(screen.getByRole('button', { name: 'Gửi yêu cầu (2 máy)' }))
-    expect(screen.getAllByText('Bắt buộc')).toHaveLength(4)
+    expect(screen.getAllByText('Bắt buộc')).toHaveLength(3)
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('rejects a past planned date and a completion date before it; submits once valid', () => {
     const onSubmit = vi.fn()
     const today = todayIso()
-    render(<Harness onSubmit={onSubmit} initial={{ requestedBy: 'E001', plannedMoveDate: '2000-01-02', plannedDoneDate: '2000-01-01', reason: 'Re-layout' }} />)
+    render(<Harness onSubmit={onSubmit} initial={{ plannedMoveDate: '2000-01-02', plannedDoneDate: '2000-01-01', reason: 'Re-layout' }} />)
     fireEvent.click(screen.getByRole('button', { name: 'Gửi yêu cầu (2 máy)' }))
     expect(screen.getByText('Không được chọn ngày trong quá khứ')).toBeTruthy()
     expect(screen.getByText('Phải từ ngày dự kiến trở đi')).toBeTruthy()
@@ -33,7 +33,7 @@ describe('RelocationForm', () => {
     fireEvent.change(screen.getByLabelText(/Ngày dự kiến/), { target: { value: today } })
     fireEvent.change(screen.getByLabelText(/Ngày hoàn thành/), { target: { value: today } })
     fireEvent.click(screen.getByRole('button', { name: 'Gửi yêu cầu (2 máy)' }))
-    expect(onSubmit).toHaveBeenCalledWith({ requestedBy: 'E001', plannedMoveDate: today, plannedDoneDate: today, reason: 'Re-layout' })
+    expect(onSubmit).toHaveBeenCalledWith({ plannedMoveDate: today, plannedDoneDate: today, reason: 'Re-layout' })
   })
 
   it('date inputs: min = today (local) for the planned date, min = planned date for completion', () => {
@@ -54,10 +54,22 @@ describe('RelocationForm', () => {
     expect(todayIso(new Date(2026, 11, 31, 23, 59))).toBe('2026-12-31')
   })
 
+  it('no employee ID field: a read-only "Người yêu cầu: {account}" line instead', () => {
+    render(<Harness onSubmit={() => {}} />)
+    expect(screen.queryByLabelText(/Mã nhân viên/)).toBeNull()
+    expect(screen.getByTestId('reloc-requester').textContent).toBe('Người yêu cầu: Không rõ tên (viet.ta)')
+    expect(screen.getByTestId('reloc-requester').querySelector('input')).toBeNull()
+  })
+
+  it('requester line shows the name and the account', () => {
+    render(<Harness onSubmit={() => {}} requesterName="Nguyễn Trọng Ngữ" />)
+    expect(screen.getByTestId('reloc-requester').textContent).toBe('Người yêu cầu: Nguyễn Trọng Ngữ (viet.ta)')
+  })
+
   it('English labels', () => {
     render(<Harness onSubmit={() => {}} lang="en" />)
     fireEvent.click(screen.getByRole('button', { name: 'Submit request (2 machines)' }))
-    expect(screen.getAllByText('Required')).toHaveLength(4)
-    expect(screen.getByLabelText(/Employee ID/)).toBeTruthy()
+    expect(screen.getAllByText('Required')).toHaveLength(3)
+    expect(screen.getByTestId('reloc-requester').textContent).toBe('Requested by: Unknown name (viet.ta)')
   })
 })

@@ -2,9 +2,13 @@ import { ZONE_INDEX } from '../data/mapData'
 import type { RelocationItem, RelocationRequest, RelocationStatus, RelocationTarget } from '../types/relocation'
 import { isMajorZone } from '../utils/relocationInput'
 import { majorZone } from '../utils/zone'
-import { API_BASE_URL } from './fixedAssetApi'
+import { API_BASE_URL, apiFetch, notifyUnauthorized } from './fixedAssetApi'
 
-export type NewRelocationRequest = Omit<RelocationRequest, 'id' | 'status' | 'to' | 'createdAt' | 'drawingUrl'> & { to: RelocationTarget }
+/** requestedBy is never sent: the server takes the logged-in account (session); it only fills the local copy. */
+export type NewRelocationRequest = Omit<RelocationRequest, 'id' | 'status' | 'to' | 'createdAt' | 'drawingUrl' | 'requestedBy'> & {
+  to: RelocationTarget
+  requestedBy?: string
+}
 /** webUrl is null when the server has no web address for its drawings. */
 export interface UploadedDrawing {
   fileName: string
@@ -42,6 +46,7 @@ interface ApiRequest {
   requestNo: string
   status: RelocationStatus | null
   requestedBy: string | null
+  requesterName?: string | null
   reason: string | null
   plannedMoveDate: string | null
   plannedDoneDate: string | null
@@ -61,6 +66,7 @@ export class RelocationApiError extends Error {
 }
 
 async function readApi<T>(response: Response): Promise<T> {
+  if (response.status === 401) notifyUnauthorized()
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     const message = typeof data?.error === 'string' ? data.error : `HTTP ${response.status}`
@@ -106,6 +112,7 @@ function fromApi(r: ApiRequest): RelocationRequest {
     })),
     to: { layoutId: ZONE_INDEX.get(zone) ?? null, zone },
     requestedBy: r.requestedBy ?? '',
+    requesterName: r.requesterName ?? null,
     plannedMoveDate: r.plannedMoveDate ?? '',
     plannedDoneDate: r.plannedDoneDate ?? '',
     reason: r.reason ?? '',
@@ -120,18 +127,18 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
   constructor(private readonly baseUrl = API_BASE_URL, private readonly pageSize = 100) {}
 
   async list(): Promise<RelocationRequest[]> {
-    const response = await fetch(`${this.baseUrl}/api/relocation-requests?size=${this.pageSize}`)
+    const response = await apiFetch(`${this.baseUrl}/api/relocation-requests?size=${this.pageSize}`)
     const page = await readApi<{ items: ApiRequest[] }>(response)
     return page.items.map(fromApi).reverse()
   }
 
   async get(requestNo: string): Promise<RelocationRequest> {
-    const response = await fetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}`)
+    const response = await apiFetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}`)
     return fromApi(await readApi<ApiRequest>(response))
   }
 
   async create(input: NewRelocationRequest): Promise<CreatedRelocationRequest> {
-    const response = await fetch(`${this.baseUrl}/api/relocation-requests`, {
+    const response = await apiFetch(`${this.baseUrl}/api/relocation-requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -140,7 +147,6 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
         plannedMoveDate: input.plannedMoveDate,
         plannedDoneDate: input.plannedDoneDate,
         reason: input.reason,
-        requestedBy: input.requestedBy,
       }),
     })
     const created = await readApi<ApiCreateResponse>(response)
@@ -156,14 +162,14 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
         status: created.status,
       }
     })
-    return { ...input, id: created.requestNo, items, status: created.status, skipped: created.skipped ?? [] }
+    return { ...input, requestedBy: input.requestedBy ?? '', id: created.requestNo, items, status: created.status, skipped: created.skipped ?? [] }
   }
 
   /** POST /api/relocation-requests/{requestNo}/drawing (multipart "file", PNG). */
   async uploadDrawing(requestNo: string, png: Blob): Promise<UploadedDrawing> {
     const body = new FormData()
     body.append('file', png, `${requestNo}.png`)
-    const response = await fetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}/drawing`, { method: 'POST', body })
+    const response = await apiFetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}/drawing`, { method: 'POST', body })
     const saved = await readApi<{ fileName?: string; webUrl?: string | null }>(response)
     return { fileName: saved.fileName ?? `${requestNo}.png`, webUrl: saved.webUrl ?? null }
   }

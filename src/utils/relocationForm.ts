@@ -1,5 +1,4 @@
 export interface RelocationFormValues {
-  requestedBy: string
   plannedMoveDate: string
   plannedDoneDate: string
   reason: string
@@ -8,7 +7,8 @@ export interface RelocationFormValues {
 export type RelocationFormErrorCode = 'required' | 'past' | 'beforeStart'
 export type RelocationFormErrors = Partial<Record<keyof RelocationFormValues, RelocationFormErrorCode>>
 
-export const EMPTY_FORM: RelocationFormValues = { requestedBy: '', plannedMoveDate: '', plannedDoneDate: '', reason: '' }
+/** The requester is the logged-in account (session), not a form field. */
+export const EMPTY_FORM: RelocationFormValues = { plannedMoveDate: '', plannedDoneDate: '', reason: '' }
 
 /** Local date as YYYY-MM-DD (the <input type="date"> format). */
 export function todayIso(now: Date = new Date()): string {
@@ -26,7 +26,6 @@ export function formatRequestDate(iso: string | null | undefined, vi: boolean): 
 /** ISO dates compare correctly as strings. */
 export function validateRelocationForm(v: RelocationFormValues, today: string = todayIso()): RelocationFormErrors {
   const errors: RelocationFormErrors = {}
-  if (!v.requestedBy.trim()) errors.requestedBy = 'required'
   if (!v.plannedMoveDate) errors.plannedMoveDate = 'required'
   else if (v.plannedMoveDate < today) errors.plannedMoveDate = 'past'
   if (!v.plannedDoneDate) errors.plannedDoneDate = 'required'

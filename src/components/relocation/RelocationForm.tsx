@@ -1,11 +1,16 @@
-import { Alert, Box, Button, Stack, TextField } from '@mui/material'
+import { Alert, Box, Button, Stack, TextField, Typography } from '@mui/material'
 import { useState, type FormEvent } from 'react'
+import { displayName } from '../../api/authApi'
 import type { Lang } from '../../types/fixedAsset'
 import { glassFilterControls } from '../../theme/liquidGlass'
 import { todayIso, validateRelocationForm, type RelocationFormErrorCode, type RelocationFormValues } from '../../utils/relocationForm'
 
 interface Props {
   lang: Lang
+  /** Logged-in account: shown read-only, the server takes it from the session. */
+  account: string
+  /** Requester's name (logged-in user); null = unknown. */
+  requesterName?: string | null
   value: RelocationFormValues
   onChange: (value: RelocationFormValues) => void
   /** Machines that actually move; the submit button is disabled when 0. */
@@ -21,7 +26,7 @@ const MESSAGES: Record<RelocationFormErrorCode, { vi: string; en: string }> = {
   beforeStart: { vi: 'Phải từ ngày dự kiến trở đi', en: 'Must be on or after the planned date' },
 }
 
-export function RelocationForm({ lang, value, onChange, moverCount, submitting = false, error, onSubmit }: Props) {
+export function RelocationForm({ lang, account, requesterName = null, value, onChange, moverCount, submitting = false, error, onSubmit }: Props) {
   const vi = lang === 'vi'
   const [touched, setTouched] = useState(false)
   const today = todayIso()
@@ -41,9 +46,12 @@ export function RelocationForm({ lang, value, onChange, moverCount, submitting =
   return (
     <Box component="form" noValidate onSubmit={submit} aria-label={vi ? 'Thông tin yêu cầu' : 'Request details'}>
       <Stack spacing={1.5} sx={(theme) => ({ ...glassFilterControls(theme), '& .MuiInputBase-multiline.MuiOutlinedInput-root': { height: 'auto' } })}>
-        {/* Row 1: employee · planned · completion (one per line on narrow screens). */}
-        <Box sx={{ display: 'grid', gap: 1.5, alignItems: 'start', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(3, minmax(0, 1fr))' } }}>
-          <TextField size="small" required fullWidth label={vi ? 'Mã nhân viên' : 'Employee ID'} value={value.requestedBy} onChange={set('requestedBy')} error={!!shown.requestedBy} helperText={msg('requestedBy')} />
+        <Typography variant="body2" color="text.secondary" data-testid="reloc-requester">
+          {vi ? 'Người yêu cầu: ' : 'Requested by: '}
+          <Box component="strong" sx={{ color: 'text.primary' }}>{displayName(requesterName, lang)}</Box> ({account})
+        </Typography>
+        {/* Row 1: planned · completion (one per line on narrow screens). */}
+        <Box sx={{ display: 'grid', gap: 1.5, alignItems: 'start', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(2, minmax(0, 1fr))' } }}>
           <TextField
             size="small"
             required

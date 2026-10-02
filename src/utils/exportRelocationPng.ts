@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { displayName } from '../api/authApi'
 import { facLabel } from '../config/relocation'
 import { EXPORT_FONT, FOCUS, RelocationFloorMap, type RelocationLayout } from '../components/relocation/RelocationFloorMap'
 import { sceneRotation } from '../components/map/MapScene'
@@ -21,7 +22,7 @@ export type ExportRow = Pick<AssetLocation, 'code' | 'name' | 'currentZone' | 'p
 export interface RelocationExportInput {
   /** UI language of the caller; the image itself is always in English. */
   lang?: Lang
-  request: Pick<RelocationRequest, 'id' | 'requestedBy' | 'plannedMoveDate' | 'plannedDoneDate' | 'createdAt'> & Partial<Pick<RelocationRequest, 'reason'>>
+  request: Pick<RelocationRequest, 'id' | 'requestedBy' | 'plannedMoveDate' | 'plannedDoneDate' | 'createdAt'> & Partial<Pick<RelocationRequest, 'reason' | 'requesterName'>>
   /** Machines that move (current location = where they leave). */
   rows: readonly ExportRow[]
   target: RelocationTarget
@@ -441,7 +442,7 @@ async function drawRelocationPng(input: RelocationExportInput, deps: ExportDeps)
   g.fillText(
     [
       `Created: ${stampOf(r.createdAt, now)}`,
-      `Requested by: ${r.requestedBy || '-'}`,
+      `Requested by: ${displayName(r.requesterName, 'en')} (${r.requestedBy || '-'})`,
       `Planned move: ${formatRequestDate(r.plannedMoveDate, false)}`,
       `Planned completion: ${formatRequestDate(r.plannedDoneDate, false)}`,
     ].join('   ·   '),

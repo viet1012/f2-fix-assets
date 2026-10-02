@@ -33,8 +33,9 @@ describe('API relocation repository', () => {
       plannedMoveDate: '2026-10-05',
       plannedDoneDate: '2026-10-06',
       reason: 'Layout change',
-      requestedBy: 'E001',
     })
+    // The server takes the requester from the session; the cookie is sent.
+    expect(init.credentials).toBe('include')
     expect(created).toMatchObject({ id: 'RL-2026-0001', status: 'REQ_PENDING', items: [{ code: 'M1', name: 'Press', moveType: 'building' }], skipped: [] })
   })
 

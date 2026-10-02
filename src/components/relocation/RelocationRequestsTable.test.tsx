@@ -18,6 +18,16 @@ const req: RelocationRequest = {
 }
 
 describe('RelocationRequestsTable', () => {
+  it('requester column: "{requesterName} ({account})", placeholder when the name is unknown', () => {
+    const reqs = [{ ...req, requesterName: 'Nguyễn Trọng Ngữ' }, { ...req, id: 'RL-2026-0002', requesterName: null }]
+    const cell = (id: string) => [...document.querySelector(`tr[data-request="${id}"]`)!.querySelectorAll('td')].map((td) => td.textContent)
+    const { rerender } = render(<RelocationRequestsTable lang="vi" requests={reqs} />)
+    expect(cell('RL-2026-0001')).toContain('Nguyễn Trọng Ngữ (E001)')
+    expect(cell('RL-2026-0002')).toContain('Không rõ tên (E001)')
+    rerender(<RelocationRequestsTable lang="en" requests={reqs} />)
+    expect(cell('RL-2026-0002')).toContain('Unknown name (E001)')
+  })
+
   it('status labels (vi/en); an unknown status is shown as its raw code', () => {
     const statuses = ['REQ_PENDING', 'REQ_APPROVED', 'REQ_REJECTED', 'REQ_DONE', 'REQ_LEGACY_X']
     const reqs = statuses.map((s, i) => ({ ...req, id: `RL-2026-000${i + 1}`, status: s as RelocationRequest['status'] }))

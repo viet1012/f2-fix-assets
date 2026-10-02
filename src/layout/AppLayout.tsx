@@ -9,7 +9,7 @@ interface Props {
   children: ReactNode
 }
 
-/** Theme + page shell: sticky header, then a max-width content column. */
+/** Theme + page shell: sticky header, then a max-width content column (no top padding: the header's bottom padding is the gap). */
 export function AppLayout({ mode, header, children }: Props) {
   const theme = useMemo(() => createAppTheme(mode), [mode])
   return (
@@ -27,7 +27,7 @@ export function AppLayout({ mode, header, children }: Props) {
         })}
       >
         {header}
-        <Stack component="main" spacing={density.gap} sx={{ maxWidth: 1920, mx: 'auto', px: { xs: 1.5, md: 2.5 }, py: { xs: 1.25, md: 1.5 } }}>
+        <Stack component="main" spacing={density.gap} sx={{ maxWidth: 1920, mx: 'auto', px: { xs: 1.5, md: 2.5 }, pt: 0, pb: { xs: 1.25, md: 1.5 } }}>
           {children}
         </Stack>
       </Box>

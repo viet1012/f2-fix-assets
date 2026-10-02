@@ -98,13 +98,20 @@ describe('exportRelocationPng', () => {
       expect(decodeURIComponent(src)).toContain(`href="${IMG}"`)
     }
     expect(d.toDataUrl).toHaveBeenCalledWith(floor1.imageData)
+    // The export always uses the original drawing, never the 3D variant.
+    expect(d.toDataUrl).not.toHaveBeenCalledWith(floor1.imageData3d)
+  })
+
+  it('"Requested by" shows the requester name (English placeholder when unknown)', async () => {
+    const { texts } = await run({ request: { ...input.request, requesterName: 'Nguyễn Trọng Ngữ' } })
+    expect(texts().some((t) => t.includes('Requested by: Nguyễn Trọng Ngữ (E001)'))).toBe(true)
   })
 
   it('always English (lang="vi"): title, header fields, yyyy-MM-dd dates, buildings, Before / After, badges', async () => {
     const { texts, d } = await run()
     const all = texts()
     expect(all).toContain('Machine Relocation Request RL-2026-0001')
-    expect(all).toContain('Created: 2026-10-01 09:15   ·   Requested by: E001   ·   Planned move: 2026-10-05   ·   Planned completion: 2026-10-31')
+    expect(all).toContain('Created: 2026-10-01 09:15   ·   Requested by: Unknown name (E001)   ·   Planned move: 2026-10-05   ·   Planned completion: 2026-10-31')
     expect(all).toContain('1 machine → Building A / 1F / A3-1')
     expect(all).toContain('Before · Building A / 1F')
     expect(all).toContain('After · Building A / 1F / A3-1')

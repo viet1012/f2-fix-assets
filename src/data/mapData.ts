@@ -4,6 +4,12 @@ import floor1Guide from '../assets/maps/floor1-guide.png'
 import floor1Warehouse from '../assets/maps/floor1-warehouse.png'
 import floor1Mold from '../assets/maps/floor1-mold.png'
 import floor2All from '../assets/maps/floor2-all.png'
+// "3D look" variants (scripts/make3dMaps.py): same size as the originals, so all geometry is shared.
+import floor1Press3d from '../assets/maps/floor1-press-3d.png'
+import floor1Guide3d from '../assets/maps/floor1-guide-3d.png'
+import floor1Warehouse3d from '../assets/maps/floor1-warehouse-3d.png'
+import floor1Mold3d from '../assets/maps/floor1-mold-3d.png'
+import floor2All3d from '../assets/maps/floor2-all-3d.png'
 
 import {
   FLOOR1_GUIDE_AREAS,
@@ -60,6 +66,7 @@ export const FLOORS = [
     imgW: 1226,
     imgH: 718,
     imageData: floor1Press,
+    imageData3d: floor1Press3d,
     areas: FLOOR1_PRESS_AREAS,
     subAreas: SUB_AREAS.floor1,
     dbFloor: "1F",
@@ -101,6 +108,7 @@ export const FLOORS = [
     imgW: 1178,
     imgH: 509,
     imageData: floor1Guide,
+    imageData3d: floor1Guide3d,
     areas: FLOOR1_GUIDE_AREAS,
     subAreas: SUB_AREAS.floor2,
     dbFloor: "1F",
@@ -121,6 +129,7 @@ export const FLOORS = [
     imgW: 890,
     imgH: 754,
     imageData: floor1Warehouse,
+    imageData3d: floor1Warehouse3d,
     areas: FLOOR1_WAREHOUSE_AREAS,
     subAreas: SUB_AREAS.floor3,
     dbFloor: "1F",
@@ -154,6 +163,7 @@ export const FLOORS = [
     imgW: 467,
     imgH: 737,
     imageData: floor1Mold,
+    imageData3d: floor1Mold3d,
     areas: FLOOR1_MOLD_AREAS,
     subAreas: SUB_AREAS.floor4,
     dbFloor: "1F",
@@ -182,6 +192,7 @@ export const FLOORS = [
     imgW: 1228,
     imgH: 717,
     imageData: floor2All,
+    imageData3d: floor2All3d,
     areas: FLOOR2_ALL_AREAS,
     subAreas: SUB_AREAS.floor5,
     dbFloor: "2F",

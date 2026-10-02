@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { todayIso, validateRelocationForm } from './relocationForm'
 
 const today = '2026-09-30'
-const v = (plannedMoveDate: string, plannedDoneDate: string, requestedBy = 'E001', reason = 'Layout change') => ({ requestedBy, plannedMoveDate, plannedDoneDate, reason })
+const v = (plannedMoveDate: string, plannedDoneDate: string, reason = 'Layout change') => ({ plannedMoveDate, plannedDoneDate, reason })
 
 describe('validateRelocationForm', () => {
   it('accepts today and plannedDoneDate equal to plannedMoveDate', () => {
@@ -14,8 +14,8 @@ describe('validateRelocationForm', () => {
     expect(validateRelocationForm(v('2026-10-05', '2026-10-04'), today)).toEqual({ plannedDoneDate: 'beforeStart' })
   })
 
-  it('requires employee ID, both dates and a reason', () => {
-    expect(validateRelocationForm(v('', '', '  ', ' '), today)).toEqual({ requestedBy: 'required', plannedMoveDate: 'required', plannedDoneDate: 'required', reason: 'required' })
+  it('requires both dates and a reason (the requester is the session account)', () => {
+    expect(validateRelocationForm(v('', '', ' '), today)).toEqual({ plannedMoveDate: 'required', plannedDoneDate: 'required', reason: 'required' })
   })
 
   it('todayIso uses the local date', () => {
