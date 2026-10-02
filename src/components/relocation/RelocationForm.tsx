@@ -1,5 +1,5 @@
 import { Alert, Box, Button, Stack, TextField, Typography } from '@mui/material'
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type Ref } from 'react'
 import { displayName } from '../../api/authApi'
 import type { Lang } from '../../types/fixedAsset'
 import { glassFilterControls } from '../../theme/liquidGlass'
@@ -18,6 +18,8 @@ interface Props {
   submitting?: boolean
   error?: string | null
   onSubmit: (value: RelocationFormValues) => void
+  /** "Planned date" input: focused once the destination zone is picked. */
+  plannedDateRef?: Ref<HTMLInputElement>
 }
 
 const MESSAGES: Record<RelocationFormErrorCode, { vi: string; en: string }> = {
@@ -26,7 +28,7 @@ const MESSAGES: Record<RelocationFormErrorCode, { vi: string; en: string }> = {
   beforeStart: { vi: 'Phải từ ngày dự kiến trở đi', en: 'Must be on or after the planned date' },
 }
 
-export function RelocationForm({ lang, account, requesterName = null, value, onChange, moverCount, submitting = false, error, onSubmit }: Props) {
+export function RelocationForm({ lang, account, requesterName = null, value, onChange, moverCount, submitting = false, error, onSubmit, plannedDateRef }: Props) {
   const vi = lang === 'vi'
   const [touched, setTouched] = useState(false)
   const today = todayIso()
@@ -59,6 +61,7 @@ export function RelocationForm({ lang, account, requesterName = null, value, onC
             type="date"
             label={vi ? 'Ngày dự kiến' : 'Planned date'}
             value={value.plannedMoveDate}
+            inputRef={plannedDateRef}
             onChange={set('plannedMoveDate')}
             error={!!shown.plannedMoveDate}
             helperText={msg('plannedMoveDate')}

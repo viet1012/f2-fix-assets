@@ -1,7 +1,7 @@
 import { alpha, Alert, Autocomplete, Box, type AutocompleteRenderGroupParams, type AutocompleteRenderOptionState, Button, IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, type ClipboardEvent, type HTMLAttributes, type Key } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ClipboardEvent, type HTMLAttributes, type Key } from 'react'
 import { ALLOWED_KINDS, FAC_LABELS, facLabel } from '../../config/relocation'
 import type { Lang } from '../../types/fixedAsset'
 import type { AssetLocation } from '../../types/location'
@@ -31,6 +31,11 @@ interface Props<R extends Row> {
   onAdd: (codes: string[]) => void
   onRemove: (code: string) => void
   onClear: () => void
+  /**
+   * The user is done picking (≥1 machine): "Next" button, Enter in the empty input, or the list closed by Esc /
+   * a click outside. Never called while picking, so the focus stays in the input.
+   */
+  onNext?: () => void
 }
 
 // No limit: every eligible machine is searchable by code, name or current zone (all words, any order).
@@ -66,7 +71,7 @@ const REPORT_LABELS: Record<Exclude<keyof CodeCheck, 'accepted'>, { vi: string; 
   pending: { vi: 'Đang có yêu cầu PENDING', en: 'Already in a PENDING request' },
 }
 
-export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, selected, selectedRows, pendingCodes, conflictCodes, isOutside, facOf, onHoverZone, onAdd, onRemove, onClear }: Props<R>) {
+export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, selected, selectedRows, pendingCodes, conflictCodes, isOutside, facOf, onHoverZone, onAdd, onRemove, onClear, onNext }: Props<R>) {
   const vi = lang === 'vi'
   const [report, setReport] = useState<CodeCheck | null>(null)
   const [input, setInput] = useState('')
@@ -147,6 +152,9 @@ export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, s
     }
     return out
   }, [groupRows, isOpen, shownByGroup])
+  // An option the user highlighted (mouse / keyboard): Enter toggles it instead of moving on.
+  const userHighlight = useRef(false)
+  const canNext = !!onNext && selectedRows.length > 0
   const selectedSet = useMemo(() => new Set(selected), [selected])
   const value = useMemo(() => [...selectedRows], [selectedRows])
 
@@ -254,6 +262,19 @@ export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, s
           isOptionEqualToValue={(a, b) => typeof b !== 'string' && a.code === b.code}
           renderOption={renderOption}
           renderGroup={renderGroup}
+          onHighlightChange={(_, option) => (userHighlight.current = option !== null)}
+          onOpen={() => (userHighlight.current = false)}
+          onClose={(_, reason) => {
+            userHighlight.current = false
+            // Esc or a click outside (blur), never a pick; a blur from leaving the window does not count.
+            if (canNext && (reason === 'escape' || (reason === 'blur' && document.hasFocus()))) onNext!()
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || !canNext || input !== '' || userHighlight.current) return
+            ;(e as typeof e & { defaultMuiPrevented?: boolean }).defaultMuiPrevented = true
+            e.preventDefault()
+            onNext!()
+          }}
           onChange={(_, next, reason, details) => {
             if (reason === 'clear') return onClear()
             if (reason === 'removeOption' && details && typeof details.option !== 'string') return onRemove(details.option.code)
@@ -283,6 +304,11 @@ export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, s
         <Typography variant="caption" color="success.main" sx={{ fontWeight: 700 }} role="status" aria-live="polite" data-testid="added-note">
           {added ? `✓ ${vi ? `Đã thêm ${added.n} máy` : `Added ${added.n} ${added.n === 1 ? 'machine' : 'machines'}`}` : ''}
         </Typography>
+        {canNext && (
+          <Button size="small" variant="outlined" onClick={onNext} sx={{ ml: 'auto !important', whiteSpace: 'nowrap' }}>
+            {vi ? 'Tiếp: Chọn vị trí đích →' : 'Next: Pick destination →'}
+          </Button>
+        )}
       </Stack>
 
       {problems.length > 0 && report && (

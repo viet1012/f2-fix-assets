@@ -81,7 +81,7 @@ describe('RelocationTab with the location API', () => {
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-900-1')
     expect(container.querySelector('[data-report="outside"]')?.textContent).toContain('A-900-1')
-    expect(screen.getByText('Đã chọn', { exact: false }).textContent).toContain('1')
+    expect(screen.getByTestId('selected-count').textContent).toBe('1')
   })
 
   it('fetches once per session across remounts', async () => {
@@ -135,7 +135,7 @@ describe('RelocationTab - browse by zone', () => {
     const { container } = render(<RelocationTab lang="vi" account="E001" />)
     const zoneEl = await openA23(container)
     expect(zoneEl.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByText(/Đã chọn/).textContent).toContain('2 máy từ 2 zone')
+    expect(screen.getByText(/máy từ/).textContent).toContain('2 máy từ 2 zone')
     expect(box('A-006-1').checked).toBe(true)
     expect(box('A-006-2').checked).toBe(false)
     expect(item('A-008-1').getAttribute('data-reason')).toBe('wrongKind')
@@ -198,11 +198,11 @@ describe('RelocationTab - highlight from the selected table', () => {
 
 describe('RelocationTab - map cards', () => {
   const afterCard = () => screen.getByTestId('reloc-after-card')
-  const pickTarget = (building: string, floor: string, zone: string) => {
+  const pickTarget = (building: string, floor: string | null, zone: string) => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: building }))
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
-    fireEvent.click(screen.getByRole('option', { name: floor }))
+    // The floor list opens by itself (a single-floor building is picked for the user: floor = null).
+    if (floor) fireEvent.click(screen.getByRole('option', { name: floor }))
     fireEvent.click(afterCard().querySelector('.reloc-zone[data-zone="' + zone + '"]')!)
   }
   const cardOf = (el: HTMLElement) => el.closest<HTMLElement>('.MuiCard-root')!
@@ -220,14 +220,16 @@ describe('RelocationTab - map cards', () => {
     expect(afterCard().getAttribute('data-move')).toBe('none')
   })
 
-  it('Before card header: one light amber chip per unique source location', async () => {
+  it('Before card header: no source chips; the browse-by-zone selects sit in the header row', async () => {
     mockFetch()
     render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2 A-015-1')
-    const chips = [...cardOf(screen.getByTestId('reloc-before-card')).querySelectorAll<HTMLElement>('.reloc-source-chip')]
-    expect(chips.map((c) => c.textContent)).toEqual(['Toà A / 1F / A2-3', 'Toà B / 1F / A15-3'])
-    expect(getComputedStyle(chips[0]).backgroundColor).toBe('rgba(183, 121, 31, 0.14)')
+    const before = cardOf(screen.getByTestId('reloc-before-card'))
+    expect(before.querySelector('.reloc-source-chip')).toBeNull()
+    const header = before.firstElementChild as HTMLElement
+    expect(within(header).getByRole('combobox', { name: 'Toà nhà (vị trí hiện tại)' })).toBeTruthy()
+    expect(within(header).getByRole('combobox', { name: 'Duyệt theo zone' })).toBeTruthy()
     // Several layouts: the layout pills are still there.
     expect(document.querySelectorAll('.reloc-layout-pill')).toHaveLength(2)
   })
@@ -256,8 +258,8 @@ describe('RelocationTab - map cards', () => {
       expect(getComputedStyle(el).maxHeight).toBe('96px')
       expect(getComputedStyle(el).minHeight === '' || getComputedStyle(el).minHeight === '0px' || getComputedStyle(el).minHeight === 'auto').toBe(true)
     }
-    // The info row above an empty map reserves no height.
-    expect(getComputedStyle(screen.getByTestId('reloc-before-empty').previousElementSibling as HTMLElement).minHeight).not.toBe('76px')
+    // Nothing (no reserved info row) between the card header and the map frame.
+    expect(screen.getByTestId('reloc-before-empty').previousElementSibling).toBeNull()
     expect(screen.getByTestId('reloc-row-pick').getAttribute('data-align')).toBe('start')
     expect(screen.getByTestId('reloc-row-summary').getAttribute('data-align')).toBe('start')
     expect(getComputedStyle(screen.getByTestId('reloc-row-pick')).alignItems).toBe('start')
@@ -266,7 +268,7 @@ describe('RelocationTab - map cards', () => {
     pasteCodes('A-006-1 A-006-2')
     expect(screen.getByTestId('reloc-row-pick').getAttribute('data-align')).toBe('start')
     pickTarget('Toà A', '1F · Press', 'A1-1')
-    expect(screen.getByTestId('reloc-route')).toBeTruthy()
+    expect(screen.getByTestId('target-route')).toBeTruthy()
     expect(screen.getByTestId('reloc-row-pick').getAttribute('data-align')).toBe('stretch')
     expect(screen.getByTestId('reloc-row-summary').getAttribute('data-align')).toBe('stretch')
     expect(screen.queryByTestId('reloc-after-empty')).toBeNull()
@@ -281,9 +283,9 @@ describe('RelocationTab - map cards', () => {
     expect(afterCard().getAttribute('data-move')).toBe('same')
     expect(getComputedStyle(cardOf(afterCard())).borderTopColor).toBe('rgb(4, 120, 87)')
     expect(screen.queryByTestId('reloc-cross-banner')).toBeNull()
-    expect(screen.getByTestId('reloc-route').textContent).toContain('2 máy→Toà A / 1F / A1-1')
-    expect(screen.getByTestId('reloc-badge-same').textContent).toBe('Cùng tầng')
-    expect(screen.queryByTestId('reloc-badge-building')).toBeNull()
+    expect(screen.getByTestId('target-route').textContent).toContain('2 máy→Toà A / 1F / A1-1')
+    expect(screen.getByTestId('target-badge-same').textContent).toBe('Cùng tầng')
+    expect(screen.queryByTestId('target-badge-building')).toBeNull()
   })
 
   it('building change: purple banner and border, solid "Đổi toà" badge', async () => {
@@ -291,11 +293,11 @@ describe('RelocationTab - map cards', () => {
     render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
-    pickTarget('Toà B', '1F · Guide', 'A15-3')
+    pickTarget('Toà B', null, 'A15-3')
     expect(afterCard().getAttribute('data-move')).toBe('cross')
     expect(screen.getByTestId('reloc-cross-banner').textContent).toBe('Đổi toà: Toà A / 1F → Toà B / 1F')
     expect(getComputedStyle(cardOf(afterCard())).borderTopColor).toBe('rgb(109, 40, 217)')
-    const badge = screen.getByTestId('reloc-badge-building')
+    const badge = screen.getByTestId('target-badge-building')
     expect(badge.textContent).toBe('Đổi toà')
     expect(getComputedStyle(badge).backgroundColor).toBe('rgb(109, 40, 217)')
   })
@@ -305,7 +307,7 @@ describe('RelocationTab - map cards', () => {
     render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
-    pickTarget('Toà B', '1F · Guide', 'A15-3')
+    pickTarget('Toà B', null, 'A15-3')
     const summary = screen.getByRole('table', { name: 'Tóm tắt di dời' })
     expect(within(summary).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Mã', 'Tên', 'Từ → Đến', 'Loại'])
     expect(screen.getByTestId('summary-route-A-006-1').textContent).toMatch(/^Toà A \/ 1F \/ \S+ → Toà B \/ 1F \/ A15-3$/)
@@ -362,12 +364,9 @@ describe('RelocationTab - pick + destination row', () => {
     await screen.findByLabelText('Chọn máy')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
+    // The cascade opens each next field.
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['1F · Press', '2F · All'])
     fireEvent.click(screen.getByRole('option', { name: '1F · Press' }))
-    const zoneInput = screen.getByRole('combobox', { name: 'Zone' })
-    fireEvent.mouseDown(zoneInput)
-    fireEvent.keyDown(zoneInput, { key: 'ArrowDown' })
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toContain('A1-1 · 26 máy')
   })
 
@@ -379,13 +378,111 @@ describe('RelocationTab - pick + destination row', () => {
     expect(screen.queryByTestId('target-route')).toBeNull()
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: 'Toà B' }))
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
-    fireEvent.click(screen.getByRole('option', { name: '1F · Guide' }))
     fireEvent.click(screen.getByTestId('reloc-after-card').querySelector('.reloc-zone[data-zone="A15-3"]')!)
     expect(screen.getByTestId('target-route').textContent).toBe('2 máy→Toà B / 1F / A15-3Đổi toà')
     expect(screen.getByTestId('target-badge-building').textContent).toBe('Đổi toà')
-    // Same component as the After card's route line.
-    expect(screen.getByTestId('reloc-route').textContent).toBe(screen.getByTestId('target-route').textContent)
+    // The route line is shown once: in the destination card only (not in the After map header).
+    expect(screen.getAllByTestId(/-route$/)).toHaveLength(1)
+    expect(within(screen.getByTestId('reloc-after-card')).queryByTestId(/-route$/)).toBeNull()
+  })
+})
+
+describe('RelocationTab - guided flow', () => {
+  const machineInput = () => screen.getByRole('combobox', { name: 'Chọn máy' }) as HTMLInputElement
+  const active = () => document.activeElement as HTMLElement
+  const stepState = (n: number) => screen.getByTestId('reloc-stepper').querySelector(`[data-step="${n}"]`)!.getAttribute('data-state')
+  /** The open Select menu that holds the focus (its listbox). */
+  const focusedListbox = () => active().closest('[role="listbox"]') ?? active().querySelector('[role="listbox"]')
+
+  it('picking the first machine keeps the focus in the picker; destination card flashes and the next step is announced', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    expect(stepState(1)).toBe('active')
+    machineInput().focus()
+    fireEvent.mouseDown(machineInput())
+    fireEvent.change(machineInput(), { target: { value: 'A-006-1' } })
+    fireEvent.click(screen.getByRole('option', { name: /A-006-1/ }))
+    expect(screen.getByTestId('selected-count').textContent).toBe('1')
+    expect(active()).toBe(machineInput())
+    expect(screen.getByTestId('reloc-dest').getAttribute('data-pulse')).toBe('true')
+    expect(screen.getByTestId('reloc-next-hint').textContent).toBe('Đã chọn 1 máy. Tiếp theo: chọn vị trí đích.')
+    expect(stepState(1)).toBe('active')
+    expect(screen.getByTestId('reloc-step-summary-1').textContent).toBe('· 1 máy')
+  })
+
+  it('"Tiếp" focuses and opens "Toà nhà"; Esc returns the focus to it', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    expect(screen.queryByRole('button', { name: 'Tiếp: Chọn vị trí đích →' })).toBeNull()
+    pasteCodes('A-006-1 A-006-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Tiếp: Chọn vị trí đích →' }))
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toContain('Toà A')
+    expect(focusedListbox()).not.toBeNull()
+    expect(stepState(2)).toBe('active')
+    fireEvent.keyDown(focusedListbox()!, { key: 'Escape' })
+    await waitFor(() => expect(active().getAttribute('aria-labelledby') ?? '').toContain(screen.getByText('Toà nhà', { selector: 'label' }).id))
+  })
+
+  it('Enter in the empty picker input moves on to "Toà nhà"', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    pasteCodes('A-006-1')
+    machineInput().focus()
+    fireEvent.keyDown(machineInput(), { key: 'Enter' })
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toContain('Toà B')
+    expect(focusedListbox()).not.toBeNull()
+  })
+
+  it('cascade: Toà → Tầng → Zone → "Ngày dự kiến"', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    pasteCodes('A-006-1')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
+    // Floor list open, focus inside it.
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['1F · Press', '2F · All'])
+    expect(focusedListbox()).not.toBeNull()
+    fireEvent.click(screen.getByRole('option', { name: '1F · Press' }))
+    const zone = screen.getByRole('combobox', { name: 'Zone' })
+    expect(active()).toBe(zone)
+    expect(zone.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(screen.getByRole('option', { name: /^A1-1 ·/ }))
+    expect(active()).toBe(screen.getByLabelText(/Ngày dự kiến/))
+    expect(stepState(3)).toBe('active')
+    expect(stepState(2)).toBe('done')
+    expect(screen.getByTestId('reloc-step-summary-2').textContent).toBe('· A1-1')
+  }, HEAVY_TEST_MS)
+
+  it('a single-floor building picks its floor and jumps to Zone; changing the building clears floor and zone', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Toà B' }))
+    expect(screen.getByRole('combobox', { name: 'Tầng / Khu' }).textContent).toBe('1F · Guide')
+    expect(active()).toBe(screen.getByRole('combobox', { name: 'Zone' }))
+    // Map click on the After map: also moves on to the details.
+    fireEvent.click(screen.getByTestId('reloc-after-card').querySelector('.reloc-zone[data-zone="A15-3"]')!)
+    expect(active()).toBe(screen.getByLabelText(/Ngày dự kiến/))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
+    expect((screen.getByRole('combobox', { name: 'Zone', hidden: true }) as HTMLInputElement).value).toBe('')
+    expect(screen.getByRole('combobox', { name: 'Tầng / Khu', hidden: true }).textContent).not.toContain('Guide')
+  }, HEAVY_TEST_MS)
+
+  it('stepper is localized (en) and a click activates the step', async () => {
+    mockFetch()
+    render(<RelocationTab lang="en" account="E001" />)
+    await screen.findByLabelText('Pick machines')
+    const stepper = screen.getByTestId('reloc-stepper')
+    expect(within(stepper).getAllByRole('button').map((b) => b.textContent)).toEqual(['1Pick machines', '2Destination', '3Details & submit'])
+    fireEvent.click(within(stepper).getByRole('button', { name: /Details & submit/ }))
+    expect(stepState(3)).toBe('active')
+    expect(within(stepper).getByRole('button', { name: /Details & submit/ }).getAttribute('aria-current')).toBe('step')
   })
 })
 
@@ -448,7 +545,6 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     pasteCodes('A-006-1 A-006-2')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tầng / Khu' }))
     fireEvent.click(screen.getByRole('option', { name: '1F · Press' }))
     fireEvent.click(screen.getByTestId('reloc-after-card').querySelector('.reloc-zone[data-zone="A1-1"]')!)
     fireEvent.change(screen.getByLabelText(/Ngày dự kiến/), { target: { value: today } })

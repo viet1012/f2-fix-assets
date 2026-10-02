@@ -1,5 +1,5 @@
-import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, Link, Stack, Switch, Typography } from '@mui/material'
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, Link, Stack, Switch, Typography, type Theme } from '@mui/material'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { facLabel } from '../../config/relocation'
 import { FLOORS, ZONE_INDEX, type LayoutId } from '../../data/mapData'
 import { useAssetsWithLocation, useLocations } from '../../hooks/useLocations'
@@ -15,7 +15,7 @@ import { density } from '../../theme/density'
 import { tokens } from '../../theme/palette'
 import { buildLocationCatalog, catalogFacs, catalogTray, isCatalogTarget, isOutsideAsset } from '../../utils/locationCatalog'
 import { buildIndexes, buildTray, movers, moveTypeOf, rowFac, rowLayoutId, targetFac, type RelocationContext } from '../../utils/relocation'
-import { EMPTY_FORM, type RelocationFormValues } from '../../utils/relocationForm'
+import { EMPTY_FORM, todayIso, validateRelocationForm, type RelocationFormValues } from '../../utils/relocationForm'
 import { downloadBlob, exportRelocationPng, snapshotExportInput, type RelocationExportInput } from '../../utils/exportRelocationPng'
 import { buildRequestItems, pendingCodesOf, rowsInZone, sourceZonesByFac } from '../../utils/relocationInput'
 import { SectionCard } from '../common/SectionCard'
@@ -23,18 +23,91 @@ import MapOutlined from '@mui/icons-material/MapOutlined'
 import { createScrollSync, DEFAULT_MAP_VIEW, type MapView } from '../map/MapScene'
 import { ErrorState, LoadingState } from '../common/States'
 import { MachinePicker, SelectionSummary } from './MachinePicker'
-import { FOCUS, RelocationFloorMap } from './RelocationFloorMap'
+import { RelocationFloorMap } from './RelocationFloorMap'
 import { RelocationForm } from './RelocationForm'
 import { RelocationRequestsTable } from './RelocationRequestsTable'
 import { RelocationSummary } from './RelocationSummary'
-import { RouteLine, TargetLocationSelect, type Route, type RouteBadge } from './TargetLocationSelect'
+import { TargetLocationSelect, type Route, type RouteBadge, type TargetLocationHandle } from './TargetLocationSelect'
 import { RelocationMapToolbar } from './RelocationMapToolbar'
 import { ZoneBrowseSelect } from './ZoneBrowseSelect'
 import { ZoneMachineList } from './ZoneMachineList'
 
 const MAP = tokens.light // Solid state colours with white text: the same in both theme modes.
-/** Space reserved above each map for its card info (pills / banner / route), so both map frames line up. */
-const MAP_INFO_MIN_H = 76
+
+const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, p: 0, m: '-1px', overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 } as const
+const reducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+/** Scroll the card holding `el` into view (smooth unless reduced motion). */
+function scrollToCard(el: HTMLElement | null) {
+  const card = el?.closest<HTMLElement>('.MuiCard-root') ?? el
+  card?.scrollIntoView?.({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' })
+}
+/** Card of the active step: 2px primary frame (outline: no layout shift). */
+const activeCardSx = (t: Theme) => ({ outline: `2px solid ${t.palette.primary.main}`, outlineOffset: '-2px' })
+/** Destination hint once machines are picked: the frame flashes twice (~1.2s), off with reduced motion. */
+const PULSE_MS = 1200
+const pulseCardSx = (t: Theme) => ({
+  '@keyframes relocDestPulse': { '0%, 100%': { boxShadow: `0 0 0 0 ${alpha(t.palette.primary.main, 0)}` }, '50%': { boxShadow: `0 0 0 4px ${alpha(t.palette.primary.main, 0.5)}` } },
+  animation: `relocDestPulse ${PULSE_MS / 2}ms ease-in-out 2`,
+  '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+})
+
+type Step = 1 | 2 | 3
+interface StepItem {
+  label: string
+  /** Short summary once done ("2 máy", "A2-3"). */
+  summary: string | null
+  done: boolean
+}
+
+/** (1) Pick machines (2) Destination (3) Details & submit: a click scrolls to the step's card. */
+function RelocationStepper({ lang, steps, active, onPick }: { lang: Lang; steps: readonly StepItem[]; active: Step; onPick: (step: Step) => void }) {
+  const vi = lang === 'vi'
+  return (
+    <Box component="nav" aria-label={vi ? 'Các bước tạo yêu cầu' : 'Request steps'} data-testid="reloc-stepper">
+      <Stack component="ol" direction="row" useFlexGap sx={{ listStyle: 'none', m: 0, p: 0, flexWrap: 'wrap', alignItems: 'center', rowGap: 0.5 }}>
+        {steps.map((s, i) => {
+          const n = (i + 1) as Step
+          const state = n === active ? 'active' : s.done ? 'done' : 'pending'
+          return (
+            <Box component="li" key={n} sx={{ display: 'flex', alignItems: 'center' }}>
+              {i > 0 && <Box aria-hidden sx={{ width: 20, height: '1px', bgcolor: 'divider', mx: 0.75 }} />}
+              <ButtonBase
+                onClick={() => onPick(n)}
+                aria-current={state === 'active' ? 'step' : undefined}
+                data-state={state}
+                data-step={n}
+                sx={(t) => ({
+                  gap: 0.75,
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: '999px',
+                  fontSize: 13,
+                  color: state === 'pending' ? 'text.secondary' : 'text.primary',
+                  '&:hover': { bgcolor: t.palette.action.hover },
+                  '&:focus-visible': { outline: `2px solid ${t.palette.primary.main}`, outlineOffset: '2px' },
+                })}
+              >
+                <Box
+                  component="span"
+                  aria-hidden
+                  sx={(t) => {
+                    const c = state === 'active' ? t.palette.primary.main : state === 'done' ? t.palette.success.main : null
+                    return { width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0, color: c ? '#ffffff' : 'text.secondary', bgcolor: c ?? 'transparent', border: c ? 0 : `1px solid ${t.palette.divider}` }
+                  }}
+                >
+                  {s.done ? '✓' : n}
+                </Box>
+                <Box component="span" sx={{ fontWeight: state === 'active' ? 700 : 500 }}>{s.label}</Box>
+                {s.summary && <Box component="span" sx={{ color: 'text.secondary', fontSize: 12 }} data-testid={`reloc-step-summary-${n}`}>· {s.summary}</Box>}
+                {s.done && <Box component="span" sx={VISUALLY_HIDDEN}>{vi ? ' (đã xong)' : ' (done)'}</Box>}
+              </ButtonBase>
+            </Box>
+          )
+        })}
+      </Stack>
+    </Box>
+  )
+}
 
 /** Empty map card body: small icon + one hint line, capped at ~96px (no tall map frame). */
 function MapEmpty({ children, testId }: { children: ReactNode; testId: string }) {
@@ -146,6 +219,51 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   /** Machines of the last 409 (already in an open request), marked red in the selected table. */
   const [conflictCodes, setConflictCodes] = useState<ReadonlySet<string>>(new Set())
 
+  // Guided flow: the active step frames its card; the user moves on (never while picking machines).
+  const [step, setStep] = useState<Step>(1)
+  const pickBox = useRef<HTMLDivElement>(null)
+  const destBox = useRef<HTMLDivElement>(null)
+  const formBox = useRef<HTMLDivElement>(null)
+  const targetSelect = useRef<TargetLocationHandle>(null)
+  const plannedDate = useRef<HTMLInputElement>(null)
+  const pickedCount = draft.selected.length
+  // 0 -> >=1 machines: flash the destination card and announce the next step; the focus stays where it is.
+  const [pulse, setPulse] = useState(false)
+  const [announce, setAnnounce] = useState('')
+  const prevCount = useRef(pickedCount)
+  useEffect(() => {
+    const prev = prevCount.current
+    prevCount.current = pickedCount
+    if (prev !== 0 || pickedCount === 0) return
+    setPulse(true)
+    setAnnounce(vi ? `Đã chọn ${pickedCount} máy. Tiếp theo: chọn vị trí đích.` : `${pickedCount} ${pickedCount === 1 ? 'machine' : 'machines'} selected. Next: pick the destination.`)
+  }, [pickedCount, vi])
+  useEffect(() => {
+    if (!pulse) return
+    const t = setTimeout(() => setPulse(false), PULSE_MS)
+    return () => clearTimeout(t)
+  }, [pulse])
+  const goToDestination = () => {
+    setStep(2)
+    scrollToCard(destBox.current)
+    targetSelect.current?.start()
+  }
+  // Zone picked: the details card, "Planned date" focused (after the zone popup has closed).
+  const [formFocus, setFormFocus] = useState(0)
+  useEffect(() => {
+    if (!formFocus) return
+    scrollToCard(formBox.current)
+    plannedDate.current?.focus({ preventScroll: true })
+  }, [formFocus])
+  const goToForm = () => {
+    setStep(3)
+    setFormFocus((n) => n + 1)
+  }
+  const pickStep = (n: Step) => {
+    setStep(n)
+    scrollToCard([pickBox, destBox, formBox][n - 1].current)
+  }
+
   const layoutOf = (id: LayoutId | null) => FLOORS.find((l) => l.id === id)
   const beforeLayoutId = viewBefore ?? draft.activeBeforeLayout
   const beforeLayout = layoutOf(beforeLayoutId)
@@ -189,15 +307,6 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   const kinds = new Set(moves.map((m) => m.type))
   const cross = kinds.has('building') || kinds.has('floor')
   const moveKind: 'cross' | 'same' | 'none' = cross ? 'cross' : moves.length ? 'same' : 'none'
-  // Before card header: one light amber chip per source location ("Toà A / 1F / A3-2").
-  const sourceChips = [
-    ...new Set(
-      draft.selectedRows.map((r) => {
-        const id = rowLayoutId(r, ctx.index)
-        return `${id ? placeOf(id, rowFac(r, ctx)) : (r.floor ?? '-')} / ${r.currentZone ?? '-'}`
-      }),
-    ),
-  ]
   const sourcePlaces = [...new Set(moves.map((m) => { const id = rowLayoutId(m.row, ctx.index); return id ? placeOf(id, rowFac(m.row, ctx)) : m.row.floor ?? '-' }))]
   const afterBorder = moveKind === 'cross' ? `2px solid ${MAP.relocCross}` : moveKind === 'same' ? `2px solid ${MAP.relocTo}` : undefined
   // "Đổi toà" / "Đổi tầng": solid purple; "Cùng tầng": light green.
@@ -207,13 +316,21 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   if (kinds.has('same')) badges.push({ key: 'same', label: vi ? 'Cùng tầng' : 'Same floor', solid: false, color: MAP.relocTo })
   const route: Route | null = target && moves.length ? { count: moves.length, dest: `${destPlace} / ${target.zone}`, badges } : null
   const routeColors = { from: MAP.relocFrom, to: MAP.relocTo }
+  const formReady = Object.keys(validateRelocationForm(form, todayIso())).length === 0 && moverCount > 0
+  const steps: StepItem[] = [
+    { label: vi ? 'Chọn máy' : 'Pick machines', summary: pickedCount ? (vi ? `${pickedCount} máy` : `${pickedCount} ${pickedCount === 1 ? 'machine' : 'machines'}`) : null, done: pickedCount > 0 },
+    { label: vi ? 'Vị trí đích' : 'Destination', summary: target?.zone ?? null, done: !!target },
+    { label: vi ? 'Thông tin & gửi' : 'Details & submit', summary: formReady ? (vi ? 'Sẵn sàng gửi' : 'Ready') : null, done: formReady },
+  ]
 
   const setTarget = (target: RelocationTarget | null) => {
     if (target) setAfterLayoutId(target.layoutId)
     draft.setTarget(target)
   }
   const pickOnMap = (target: RelocationTarget) => {
-    if (isCatalogTarget(catalog, target.layoutId, target.zone)) setTarget(target)
+    if (!isCatalogTarget(catalog, target.layoutId, target.zone)) return
+    setTarget(target)
+    goToForm()
   }
   /** Stable map callback (latest pickOnMap through a ref), so the memoised After map does not re-render for it. */
   const pickRef = useRef(pickOnMap)
@@ -311,6 +428,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       setViewBefore(null)
       setOpenZone(null)
       setForm(EMPTY_FORM)
+      setStep(1)
     } catch (e) {
       setSubmitError(relocationErrorMessage(e, vi))
       if (e instanceof RelocationApiError && e.status === 409) setConflictCodes(new Set(e.codes))
@@ -374,13 +492,17 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       )}
       {drawingError && <Alert severity="error" onClose={() => setDrawingError(null)}>{drawingError}</Alert>}
 
+      <RelocationStepper lang={lang} steps={steps} active={step} onPick={pickStep} />
+      <Box role="status" aria-live="polite" data-testid="reloc-next-hint" sx={VISUALLY_HIDDEN}>{announce}</Box>
+
       {/* Pick machines + destination side by side (3fr / 2fr) from lg, stacked below; equal heights only when both have content. */}
       <Box data-testid="reloc-row-pick" data-align={rowAlign} sx={{ display: 'grid', gap: density.gap, alignItems: rowAlign, gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' } }}>
       <SectionCard
         title={vi ? '1. Chọn máy' : '1. Pick machines'}
         actions={<SelectionSummary lang={lang} selectedRows={draft.selectedRows} onClear={draft.clear} />}
-        sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}
+        sx={[rowAlign === 'stretch' && { height: '100%' }, step === 1 && activeCardSx]}
       >
+        <Box ref={pickBox} onFocus={() => setStep(1)}>
         <MachinePicker
           lang={lang}
           rows={rows}
@@ -395,11 +517,15 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           onAdd={draft.add}
           onRemove={draft.remove}
           onClear={draft.clear}
+          onNext={goToDestination}
         />
+        </Box>
       </SectionCard>
 
-      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
+      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={[rowAlign === 'stretch' && { height: '100%' }, step === 2 && activeCardSx, pulse && pulseCardSx]}>
+        <Box ref={destBox} onFocus={() => setStep(2)} data-testid="reloc-dest" data-pulse={pulse || undefined}>
         <TargetLocationSelect
+          ref={targetSelect}
           lang={lang}
           layouts={FLOORS}
           layoutId={afterLayoutId}
@@ -409,81 +535,59 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           onTargetChange={setTarget}
           route={route}
           routeColors={routeColors}
+          onZonePicked={goToForm}
         />
+        </Box>
       </SectionCard>
       </Box>
 
-      <Stack spacing={1}>
-        <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} />
-        <ZoneBrowseSelect lang={lang} zonesByFac={zonesByFac} zone={openZone} onOpenZone={openZoneFromList} />
-      </Stack>
+      <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} />
 
       {/* Two equal map columns (same frame ratio and fit); the zone machine list is a third column when open. */}
       <Box sx={{ display: 'grid', gap: density.gap, alignItems: beforeLayout && afterLayout ? 'stretch' : 'start', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: openZone ? 'repeat(2, minmax(0, 1fr)) 300px' : 'repeat(2, minmax(0, 1fr))' } }}>
         <SectionCard
           title={<CardTitle color={MAP.relocFrom}>{vi ? 'Bố trí hiện tại (Trước)' : 'Current layout (Before)'}</CardTitle>}
           description={beforePlace || undefined}
+          actions={
+            <Box sx={{ width: { xs: 260, sm: 400 } }}>
+              <ZoneBrowseSelect lang={lang} zonesByFac={zonesByFac} zone={openZone} onOpenZone={openZoneFromList} />
+            </Box>
+          }
           sx={{ borderTop: `3px solid ${MAP.relocFrom}` }}
         >
           <Stack spacing={1} data-testid="reloc-before-card">
-            <Stack spacing={0.75} sx={{ minHeight: { lg: beforeLayout && afterLayout ? MAP_INFO_MIN_H : 0 } }}>
-              {sourceChips.length > 0 && (
-                <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap' }} role="list" aria-label={vi ? 'Vị trí nguồn' : 'Source locations'}>
-                  {sourceChips.map((text) => (
-                    <Box
-                      key={text}
-                      role="listitem"
-                      className="reloc-source-chip"
+            {beforeTabs.length > 1 && (
+              <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }} role="group" aria-label={vi ? 'Tầng của máy đã chọn' : 'Floors of the selected machines'}>
+                <Typography variant="body2" color="text.secondary">{vi ? 'Máy đã chọn nằm ở nhiều tầng:' : 'Selected machines are on several floors:'}</Typography>
+                {beforeTabs.map((id) => {
+                  const active = id === beforeLayoutId
+                  return (
+                    <ButtonBase
+                      key={id}
+                      className={`reloc-layout-pill${active ? ' is-active' : ''}`}
+                      data-layout={id}
+                      aria-pressed={active}
+                      onClick={() => {
+                        setViewBefore(id)
+                        draft.setBeforeLayout(id)
+                      }}
                       sx={(theme) => ({
-                        px: 1,
-                        py: 0.25,
-                        borderRadius: '4px',
+                        px: 1.25,
+                        py: 0.375,
+                        borderRadius: '999px',
                         fontSize: 12,
                         fontWeight: 700,
-                        lineHeight: 1.35,
-                        color: theme.palette.mode === 'dark' ? tokens.dark.relocFrom : FOCUS.from.stroke,
-                        bgcolor: alpha(MAP.relocFrom, 0.14),
-                        border: `1px solid ${alpha(MAP.relocFrom, 0.4)}`,
+                        color: active ? '#ffffff' : 'text.primary',
+                        bgcolor: active ? MAP.relocFrom : theme.palette.action.hover,
+                        '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
                       })}
                     >
-                      {text}
-                    </Box>
-                  ))}
-                </Stack>
-              )}
-              {beforeTabs.length > 1 && (
-                <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }} role="group" aria-label={vi ? 'Tầng của máy đã chọn' : 'Floors of the selected machines'}>
-                  <Typography variant="body2" color="text.secondary">{vi ? 'Máy đã chọn nằm ở nhiều tầng:' : 'Selected machines are on several floors:'}</Typography>
-                  {beforeTabs.map((id) => {
-                    const active = id === beforeLayoutId
-                    return (
-                      <ButtonBase
-                        key={id}
-                        className={`reloc-layout-pill${active ? ' is-active' : ''}`}
-                        data-layout={id}
-                        aria-pressed={active}
-                        onClick={() => {
-                          setViewBefore(id)
-                          draft.setBeforeLayout(id)
-                        }}
-                        sx={(theme) => ({
-                          px: 1.25,
-                          py: 0.375,
-                          borderRadius: '999px',
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: active ? '#ffffff' : 'text.primary',
-                          bgcolor: active ? MAP.relocFrom : theme.palette.action.hover,
-                          '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
-                        })}
-                      >
-                        {placeOf(id, layoutFac(id))} ({selectedOn(id).length})
-                      </ButtonBase>
-                    )
-                  })}
-                </Stack>
-              )}
-            </Stack>
+                      {placeOf(id, layoutFac(id))} ({selectedOn(id).length})
+                    </ButtonBase>
+                  )
+                })}
+              </Stack>
+            )}
             {beforeLayout ? (
               <RelocationFloorMap
                 lang={lang}
@@ -512,18 +616,15 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           sx={afterBorder ? { border: afterBorder } : undefined}
         >
           <Stack spacing={1} data-testid="reloc-after-card" data-move={moveKind}>
-            <Stack spacing={0.75} sx={{ minHeight: { lg: beforeLayout && afterLayout ? MAP_INFO_MIN_H : 0 } }}>
-              {cross && target && (
-                <Box
-                  role="status"
-                  data-testid="reloc-cross-banner"
-                  sx={{ px: 1.5, py: 0.75, borderRadius: 1, fontSize: 13, fontWeight: 700, color: '#ffffff', bgcolor: MAP.relocCross }}
-                >
-                  {kinds.has('building') ? (vi ? 'Đổi toà' : 'Building change') : vi ? 'Đổi tầng' : 'Floor change'}: {sourcePlaces.join(', ')} → {destPlace}
-                </Box>
-              )}
-              {route && <RouteLine lang={lang} route={route} fromColor={routeColors.from} toColor={routeColors.to} testId="reloc" />}
-            </Stack>
+            {cross && target && (
+              <Box
+                role="status"
+                data-testid="reloc-cross-banner"
+                sx={{ px: 1.5, py: 0.75, borderRadius: 1, fontSize: 13, fontWeight: 700, color: '#ffffff', bgcolor: MAP.relocCross }}
+              >
+                {kinds.has('building') ? (vi ? 'Đổi toà' : 'Building change') : vi ? 'Đổi tầng' : 'Floor change'}: {sourcePlaces.join(', ')} → {destPlace}
+              </Box>
+            )}
           {afterLayout ? (
             <RelocationFloorMap
               lang={lang}
@@ -565,8 +666,10 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           <RelocationSummary lang={lang} rows={draft.selectedRows} target={draft.target} zoneCount={zoneCount} ctx={ctx} />
         </SectionCard>
 
-        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
-          <RelocationForm lang={lang} account={account} requesterName={user?.name ?? null} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} />
+        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={[rowAlign === 'stretch' && { height: '100%' }, step === 3 && activeCardSx]}>
+          <Box ref={formBox} onFocus={() => setStep(3)}>
+            <RelocationForm lang={lang} account={account} requesterName={user?.name ?? null} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} plannedDateRef={plannedDate} />
+          </Box>
         </SectionCard>
       </Box>
 

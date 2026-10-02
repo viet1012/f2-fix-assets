@@ -1,5 +1,5 @@
 import { alpha, Autocomplete, Box, MenuItem, Stack, TextField, Typography } from '@mui/material'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import type { LayoutId } from '../../data/mapData'
 import type { Lang } from '../../types/fixedAsset'
 import type { RelocationTarget } from '../../types/relocation'
@@ -68,7 +68,18 @@ interface Props {
   route?: Route | null
   /** Route chip colours (the From / To state colours). */
   routeColors?: { from: string; to: string }
+  /** A zone was picked in the Zone field (the next step: the request details). */
+  onZonePicked?: () => void
+  ref?: Ref<TargetLocationHandle>
 }
+
+export interface TargetLocationHandle {
+  /** Focus "Building" and open it (no scroll: the caller scrolls the card). */
+  start: () => void
+}
+
+type Field = 'building' | 'floor' | 'zone'
+const FIELDS: readonly Field[] = ['building', 'floor', 'zone']
 
 export function countLabel(code: string, count: number, vi: boolean) {
   const base = `${count} ${vi ? 'máy' : count === 1 ? 'machine' : 'machines'}`
@@ -80,7 +91,7 @@ export function countLabel(code: string, count: number, vi: boolean) {
  * pickable).
  * Controlled by `layoutId`/`target`, so a click on the After map updates it too.
  */
-export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, target, catalog, onLayoutChange, onTargetChange, route, routeColors }: Props) {
+export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, target, catalog, onLayoutChange, onTargetChange, route, routeColors, onZonePicked, ref }: Props) {
   const vi = lang === 'vi'
   const buildings = useMemo(() => catalogFacs(catalog), [catalog])
   const unplaced = useMemo(() => unplacedZones(catalog), [catalog])
@@ -99,20 +110,48 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
   const options = useMemo(() => (layout && building ? catalogOptions(catalog, layout.id, building) : []), [catalog, layout, building])
   const value = (target && target.layoutId === layoutId && options.find((o) => o.code === target.zone)) || null
 
+  // Cascade Building → Floor → Zone: focus the next field first, then open it (so its menu returns focus there).
+  const fieldsRef = useRef<HTMLDivElement>(null)
+  const [openField, setOpenField] = useState<Field | null>(null)
+  const [advance, setAdvance] = useState<{ field: Field; preventScroll: boolean } | null>(null)
+  useEffect(() => {
+    if (!advance) return
+    const el = fieldsRef.current?.querySelectorAll<HTMLElement>('[role="combobox"]')[FIELDS.indexOf(advance.field)]
+    el?.focus({ preventScroll: advance.preventScroll })
+    setOpenField(advance.field)
+  }, [advance])
+  const openProps = (field: Field) => ({
+    open: openField === field,
+    onOpen: () => setOpenField(field),
+    onClose: () => setOpenField((f) => (f === field ? null : f)),
+  })
+  // Ignored while "Building" is already open (e.g. the picker's blur and the "Next" click of the same gesture).
+  useImperativeHandle(ref, () => ({ start: () => openField !== 'building' && setAdvance({ field: 'building', preventScroll: true }) }), [openField])
+
   return (
     <Stack spacing={1.25}>
       {/* Stacked, full width: fits the narrow column next to the machine picker. */}
-      <Stack spacing={1.5} sx={glassFilterControls}>
+      <Stack spacing={1.5} sx={glassFilterControls} ref={fieldsRef}>
         <TextField
           select
           fullWidth
           size="small"
           label={vi ? 'Toà nhà' : 'Building'}
           value={building}
+          slotProps={{ select: openProps('building') }}
           onChange={(e) => {
-            setBuilding(e.target.value)
-            onLayoutChange(null)
+            const next = e.target.value
+            setBuilding(next)
             onTargetChange(null)
+            // A single floor is picked for the user; the cascade jumps to Zone.
+            const only = catalogLayouts(catalog, allLayouts, next)
+            if (only.length === 1) {
+              onLayoutChange(only[0].id)
+              setAdvance({ field: 'zone', preventScroll: false })
+            } else {
+              onLayoutChange(null)
+              setAdvance({ field: 'floor', preventScroll: false })
+            }
           }}
         >
           {buildings.map((b) => <MenuItem key={b} value={b}>{facLabel(b, vi)}</MenuItem>)}
@@ -124,9 +163,11 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
           label={vi ? 'Tầng / Khu' : 'Floor / Area'}
           value={layout && floors.some((l) => l.id === layout.id) ? layout.id : ''}
           disabled={!building}
+          slotProps={{ select: openProps('floor') }}
           onChange={(e) => {
             onLayoutChange(e.target.value as LayoutId)
             onTargetChange(null)
+            setAdvance({ field: 'zone', preventScroll: false })
           }}
         >
           {floors.map((l) => <MenuItem key={l.id} value={l.id}>{floorLabel(l)}</MenuItem>)}
@@ -141,7 +182,11 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
           getOptionLabel={(o) => o.code}
           getOptionDisabled={(o) => o.disabled}
           isOptionEqualToValue={(a, b) => a.code === b.code}
-          onChange={(_, next) => onTargetChange(next && layout ? { layoutId: layout.id, zone: next.code } : null)}
+          {...openProps('zone')}
+          onChange={(_, next) => {
+            onTargetChange(next && layout ? { layoutId: layout.id, zone: next.code } : null)
+            if (next && layout) onZonePicked?.()
+          }}
           renderOption={({ key, ...props }, o) => (
             <li key={key} {...props}>
               {/* "A2-3 · 27 máy" */}
