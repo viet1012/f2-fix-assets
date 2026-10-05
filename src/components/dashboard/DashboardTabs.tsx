@@ -6,7 +6,7 @@ import MenuBookOutlined from '@mui/icons-material/MenuBookOutlined'
 import MoveUpOutlined from '@mui/icons-material/MoveUpOutlined'
 import ReportProblemOutlined from '@mui/icons-material/ReportProblemOutlined'
 import TableRowsOutlined from '@mui/icons-material/TableRowsOutlined'
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import type { AppTab, Lang } from '../../types/fixedAsset'
 import { glassRadius, glassTabs, HEADER_HEIGHT } from '../../theme/liquidGlass'
 
@@ -28,15 +28,17 @@ interface Props {
   value: AppTab
   onChange: (tab: AppTab) => void
   issueCount: number
+  /** Right-aligned content on the same row (e.g. the collapse toggle of the summary/filters). */
+  endSlot?: ReactNode
 }
 
-export function DashboardTabs({ lang, value, onChange, issueCount }: Props) {
+export function DashboardTabs({ lang, value, onChange, issueCount, endSlot }: Props) {
   const vi = lang === 'vi'
   return (
     // Sticky floating glass bar directly under the header; content scrolls beneath it.
-    <Box sx={{ position: 'sticky', top: HEADER_HEIGHT + 6, zIndex: (t) => t.zIndex.appBar - 1, display: 'flex', alignItems: 'flex-start' }}>
+    <Box sx={{ position: 'sticky', top: HEADER_HEIGHT + 6, zIndex: (t) => t.zIndex.appBar - 1, display: 'flex', alignItems: 'center', flexWrap: { xs: 'wrap', md: 'nowrap' }, gap: 1 }}>
       <Tabs
-        sx={(theme) => ({ ...glassTabs(theme), maxWidth: '100%', width: 'fit-content' })}
+        sx={(theme) => ({ ...glassTabs(theme), maxWidth: '100%', width: 'fit-content', minWidth: 0 })}
         value={value}
         onChange={(_, next: AppTab) => onChange(next)}
         variant="scrollable"
@@ -63,6 +65,7 @@ export function DashboardTabs({ lang, value, onChange, issueCount }: Props) {
           />
         ))}
       </Tabs>
+      {endSlot && <Box sx={{ ml: 'auto', flexShrink: 0, display: 'flex', alignItems: 'center' }}>{endSlot}</Box>}
     </Box>
   )
 }

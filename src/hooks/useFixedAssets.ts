@@ -35,6 +35,10 @@ export function useFixedAssets() {
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setStatus({ type: 'loading' })
     const next = await getAssets()
+    if (import.meta.env.DEV) {
+      // Diagnostic for "Bộ phận = 0": field names of a row + `group` of 3 sample rows (no personal fields logged).
+      console.debug('[assets] row keys:', Object.keys(next.tableData[0] ?? {}), 'group samples:', next.tableData.slice(0, 3).map((r) => r.group), 'filters.groups:', next.filters?.groups?.length)
+    }
     setData(next)
     setHasLoaded(true)
     setStatus({ type: 'ready' })

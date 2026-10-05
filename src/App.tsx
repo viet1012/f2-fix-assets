@@ -4,11 +4,9 @@ import { AuthProvider } from './auth/AuthProvider'
 import { useAuth } from './auth/authContext'
 import { LoginPage } from './components/auth/LoginPage'
 import { ErrorState, LoadingState } from './components/common/States'
-import { DashboardTabs, tabId, tabPanelId } from './components/dashboard/DashboardTabs'
+import { tabId, tabPanelId } from './components/dashboard/DashboardTabs'
 import { Header } from './components/dashboard/Header'
-import { SummaryCards } from './components/dashboard/SummaryCards'
-import { UploadBar } from './components/dashboard/UploadBar'
-import { FilterBar } from './components/filters/FilterBar'
+import { DashboardControls } from './components/dashboard/DashboardControls'
 import { OverviewTab } from './components/overview/OverviewTab'
 import { useAssetFilters } from './hooks/useAssetFilters'
 import { useFixedAssets } from './hooks/useFixedAssets'
@@ -111,7 +109,7 @@ function AuthGate() {
 }
 
 function Dashboard({ lang, setLang, mode, toggleMode, account, onLogout }: Shell & { account: string; onLogout: () => Promise<void> }) {
-  const { data, status, busy, hasLoaded, reload, upload, importFromUrl } = useFixedAssets()
+  const { data, status, hasLoaded, reload } = useFixedAssets()
   const { filters, setFilters, filteredRows, resetFilters } = useAssetFilters(data.tableData)
   const [tab, setTab] = useState<AppTab>('overview')
   const [visited, setVisited] = useState<ReadonlySet<AppTab>>(() => new Set<AppTab>(['overview']))
@@ -123,6 +121,7 @@ function Dashboard({ lang, setLang, mode, toggleMode, account, onLogout }: Shell
     setTab(next)
     setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)))
   }, [])
+  const openIssues = useCallback(() => changeTab('issues'), [changeTab])
 
   const flaggedCount = useMemo(() => filteredRows.filter((r) => issueKinds(r).length > 0).length, [filteredRows])
   const initialLoading = !hasLoaded && status.type === 'loading'
@@ -168,29 +167,20 @@ function Dashboard({ lang, setLang, mode, toggleMode, account, onLogout }: Shell
         />
       }
     >
-      {/* <UploadBar
-        lang={lang}
-        status={status}
-        lastImport={data.lastImport}
-        rowCount={data.tableData.length}
-        busy={busy}
-        onUpload={upload}
-        onLoadUrl={importFromUrl}
-      /> */}
-
-      <SummaryCards rows={filteredRows} totalRows={data.tableData.length} flaggedCount={flaggedCount} lang={lang} loading={initialLoading} onOpenIssues={() => changeTab('issues')} />
-
-      <FilterBar
-        lang={lang}
-        rows={data.tableData}
-        filteredCount={filteredRows.length}
-        value={filters}
-        onChange={setFilters}
-        onReset={resetFilters}
-      />
-
       <Box>
-        <DashboardTabs lang={lang} value={tab} onChange={changeTab} issueCount={flaggedCount} />
+        <DashboardControls
+          lang={lang}
+          tab={tab}
+          onChangeTab={changeTab}
+          rows={data.tableData}
+          filteredRows={filteredRows}
+          flaggedCount={flaggedCount}
+          filters={filters}
+          onChangeFilters={setFilters}
+          onReset={resetFilters}
+          loading={initialLoading}
+          onOpenIssues={openIssues}
+        />
         {!dataReady && tab !== 'guide' && (
           <Box role="tabpanel" id={tabPanelId(tab)} aria-labelledby={tabId(tab)} sx={{ pt: density.tabGap }}>
             {initialError ? (

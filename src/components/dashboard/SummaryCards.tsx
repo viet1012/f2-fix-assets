@@ -39,7 +39,7 @@ interface MetricProps {
   onClick?: () => void
 }
 
-/** One metric cell: tinted 28px icon, 10px overline label, 17px tabular value (+ optional hint). */
+/** One metric cell (~44px): tinted 28px icon, 10px overline label, 16px tabular value (+ optional hint). */
 function Metric({ icon, label, value, hint, tooltip, tone = 'neutral', toneValue = false, loading, onClick }: MetricProps) {
   const body = (
     <>
@@ -53,17 +53,17 @@ function Metric({ icon, label, value, hint, tooltip, tone = 'neutral', toneValue
         {icon}
       </Box>
       <Box sx={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-        <Typography component="div" noWrap sx={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary', lineHeight: 1.4 }}>
+        <Typography component="div" noWrap sx={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary', lineHeight: 1.3 }}>
           {label}
         </Typography>
         {loading ? (
-          <Skeleton variant="text" width="60%" sx={{ fontSize: 17 }} />
+          <Skeleton variant="text" width="60%" sx={{ fontSize: 16 }} />
         ) : (
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, minWidth: 0, whiteSpace: 'nowrap' }}>
             <Typography
               component="span"
               data-testid="metric-value"
-              sx={(theme) => ({ fontSize: 17, fontWeight: 700, lineHeight: 1.3, fontVariantNumeric: 'tabular-nums', color: toneValue ? toneColor(theme, tone) : 'text.primary', overflow: 'hidden', textOverflow: 'ellipsis' })}
+              sx={(theme) => ({ fontSize: 16, fontWeight: 700, lineHeight: 1.25, fontVariantNumeric: 'tabular-nums', color: toneValue ? toneColor(theme, tone) : 'text.primary', overflow: 'hidden', textOverflow: 'ellipsis' })}
             >
               {value}
             </Typography>
@@ -85,11 +85,11 @@ function Metric({ icon, label, value, hint, tooltip, tone = 'neutral', toneValue
     gap: 1.25,
     minWidth: 0,
     px: 1.5,
-    py: 1,
+    py: '6px',
     borderRadius: '8px',
     // Vertical rule between metrics on lg only (one row of 5).
     [theme.breakpoints.up('lg')]: {
-      '&:not(:first-of-type)::before': { content: '""', position: 'absolute', left: 0, top: 10, bottom: 10, width: '1px', bgcolor: 'divider' },
+      '&:not(:first-of-type)::before': { content: '""', position: 'absolute', left: 0, top: 8, bottom: 8, width: '1px', bgcolor: 'divider' },
     },
   })
   const cell = onClick ? (
@@ -128,7 +128,8 @@ function SummaryCardsImpl({ rows, totalRows, flaggedCount, lang, loading = false
       variant="outlined"
       aria-label={vi ? 'Chỉ số tổng quan' : 'Key metrics'}
       sx={{
-        p: 0.75,
+        px: 0.75,
+        py: '2px',
         borderRadius: '12px',
         display: 'grid',
         gap: 0.25,
