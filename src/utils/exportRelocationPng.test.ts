@@ -280,11 +280,13 @@ describe('renderExportSvg (RelocationFloorMap export mode)', () => {
 
   it('zone chips carry no machine count', () => {
     const svg = renderExportSvg(input, 'after', floor1, IMG, { w: 1140, h: 620 })
-    expect(svg).toContain('>A3-1</text>')
+    // The destination has no zone chip (its pin caption names it); the other chips are code only.
+    expect(svg).toContain('>A3-1 · ')
+    expect(svg).toMatch(/>A\d+-\d+<\/text>/)
     expect(svg).not.toMatch(/>[A-Z]\d+(-\d+)? · \d+</)
   })
 
-  it('same-layout arrow: flat (lift <= 15% of the distance) and bowed downward', () => {
+  it('same-layout arrow: flat (lift <= 15% of the distance)', () => {
     const svg = renderExportSvg(input, 'after', floor1, IMG, { w: 1140, h: 620 })
     const m = /data-from="A2-3"><path[^>]*? d="M([\d.]+),([\d.]+) Q([\d.]+),([\d.]+) ([\d.]+),([\d.]+)"/.exec(svg)!
     const [x0, y0, cx, cy, x1, y1] = m.slice(1).map(Number)
@@ -297,7 +299,6 @@ describe('renderExportSvg (RelocationFloorMap export mode)', () => {
     const dist = Math.abs((b.x - a.x) * (a.y - c.y) - (a.x - c.x) * (b.y - a.y)) / len
     expect(dist / 2 / len).toBeLessThanOrEqual(0.15)
     expect(dist / len).toBeLessThanOrEqual(0.15)
-    expect(c.y).toBeGreaterThanOrEqual((a.y + b.y) / 2)
   })
 
   it('fits the scene into the box (rotated Mold layout included)', () => {

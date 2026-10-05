@@ -349,13 +349,14 @@ export const ARROW_BOW = FOCUS.arrow.bow
 type Pt = { x: number; y: number }
 
 /**
- * Curved arrow (quadratic) from a to b, in the 0-100 viewBox, bowed to the left of travel (`bow` > 0) or to the right
- * (`bow` < 0). It starts START_GAP after the source pin centre and ends END_GAP before the target pin centre (along
+ * Curved arrow (quadratic) from a to b, in the 0-100 viewBox, bowed by `bow` (share of the length) to the left of
+ * travel (`side` +1) or to the right (`side` -1). It starts START_GAP after the source pin centre and ends END_GAP before the target pin centre (along
  * the tangent), so it never runs into the dots. The head is an open chevron whose tip is the end of the line.
  * Geometry is computed in image pixels so the curve and head keep their shape although the viewBox is stretched to
- * the image aspect ratio. `samples`: ARROW_SAMPLES points along the drawn curve, in scene %.
+ * the image aspect ratio. `samples`: ARROW_SAMPLES points along the drawn curve, in scene %; `startDir` / `endDir`:
+ * unit tangents (image px) where the line leaves the source and reaches the target.
  */
-function arrowGeometry(a: Pt, b: Pt, imgW: number, imgH: number, bow: number) {
+function arrowGeometry(a: Pt, b: Pt, imgW: number, imgH: number, bow: number, side: 1 | -1) {
   const toPx = (p: Pt) => ({ x: (p.x * imgW) / 100, y: (p.y * imgH) / 100 })
   const toScene = (p: Pt) => ({ x: (p.x / imgW) * 100, y: (p.y / imgH) * 100 })
   const toPct = (p: Pt) => `${((p.x / imgW) * 100).toFixed(3)},${((p.y / imgH) * 100).toFixed(3)}`
@@ -367,7 +368,7 @@ function arrowGeometry(a: Pt, b: Pt, imgW: number, imgH: number, bow: number) {
   const p2 = toPx(b)
   const dx = p2.x - p0.x
   const dy = p2.y - p0.y
-  const c = { x: (p0.x + p2.x) / 2 + dy * bow, y: (p0.y + p2.y) / 2 - dx * bow }
+  const c = { x: (p0.x + p2.x) / 2 + side * dy * bow, y: (p0.y + p2.y) / 2 - side * dx * bow }
   const u0 = unit(p0, c)
   const u1 = unit(c, p2)
   const start = { x: p0.x + u0.x * START_GAP, y: p0.y + u0.y * START_GAP }
@@ -390,12 +391,47 @@ function arrowGeometry(a: Pt, b: Pt, imgW: number, imgH: number, bow: number) {
     d: `M${toPct(start)} Q${toPct(c)} ${toPct(end)}`,
     head: [arm(1), end, arm(-1)].map(toPct).join(' '),
     samples,
+    startDir: u0,
+    endDir: u1,
   }
 }
 
 /** Number of points (on-screen px) inside any of the boxes. */
 function hits(points: readonly Pt[], boxes: readonly Box4[]) {
   return points.filter((p) => boxes.some((o) => p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h)).length
+}
+
+/** Whether segment p-q crosses box o (Liang-Barsky clipping). */
+function segmentHitsBox(p: Pt, q: Pt, o: Box4) {
+  const dx = q.x - p.x
+  const dy = q.y - p.y
+  let t0 = 0
+  let t1 = 1
+  for (const [pk, qk] of [[-dx, p.x - o.x], [dx, o.x + o.w - p.x], [-dy, p.y - o.y], [dy, o.y + o.h - p.y]]) {
+    if (pk === 0) {
+      if (qk < 0) return false
+      continue
+    }
+    const r = qk / pk
+    if (pk < 0) t0 = Math.max(t0, r)
+    else t1 = Math.min(t1, r)
+    if (t0 > t1) return false
+  }
+  return true
+}
+
+/** Whether the polyline through `points` (on-screen px) crosses box o. */
+const polylineHitsBox = (points: readonly Pt[], o: Box4) => points.some((p, i) => i > 0 && segmentHitsBox(points[i - 1], p, o))
+
+/**
+ * Pin caption placed towards `dir` (on-screen, pointing away from the arrow at that pin): below the dot when `dir`
+ * points down, above otherwise; right of the dot when `dir` points right, left when it points left, centred when
+ * vertical. Without a direction: above, centred.
+ */
+function captionBox(c: Pt, size: { w: number; h: number }, dir: Pt | undefined) {
+  if (!dir) return { x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h, dir: -1 as const }
+  const x = Math.abs(dir.x) < 1e-6 ? c.x - size.w / 2 : dir.x > 0 ? c.x + 4 : c.x - 4 - size.w
+  return dir.y > 0 ? { x, y: c.y + PIN_GAP, dir: 1 as const } : { x, y: c.y - PIN_GAP - size.h, dir: -1 as const }
 }
 
 interface Shape {
@@ -423,6 +459,9 @@ interface Arrow {
   /** Chevron points (arm, tip, arm). */
   head: string
   samples: Pt[]
+  /** Unit tangents (image px) leaving the source / reaching the target. */
+  startDir: Pt
+  endDir: Pt
 }
 
 interface CrossPill {
@@ -581,7 +620,7 @@ function RelocationFloorMapImpl({
     role === 'before'
       ? [...placed].filter(([zone]) => centers.has(zone)).map(([zone, rs]) => ({ code: zone, kind: 'from', label: pinLabel(rs) }))
       : [
-          ...(toZone && centers.has(toZone) && toRows.length ? [{ code: toZone, kind: 'to' as const, label: toRows.length === 1 ? toRows[0].code : countText(toRows.length) }] : []),
+          ...(toZone && centers.has(toZone) && toRows.length ? [{ code: toZone, kind: 'to' as const, label: `${toZone} · ${toRows.length === 1 ? toRows[0].code : countText(toRows.length)}` }] : []),
           ...[...placed]
             .filter(([zone]) => zone !== toZone && centers.has(zone))
             .map(([zone, rs]) => ({ code: zone, kind: 'old' as const, label: `${pinLabel(rs)} (${vi ? 'cũ' : 'old'})` })),
@@ -629,8 +668,8 @@ function RelocationFloorMapImpl({
     const h = (s.box.h * H) / 100
     const isRel = related.has(s.code)
     const state = states.get(s.code)!
-    // From / old zones carry a pin with the machine codes; their own chip would sit under it.
-    if (state === 'from' || state === 'old') return []
+    // From / to / old zones carry a pin whose caption names the machines; their own chip would sit under it.
+    if (state === 'from' || state === 'old' || state === 'to') return []
     if (sceneW > 0 && !s.major && !isRel && (w < MIN_LABEL_W || h < MIN_LABEL_H)) return []
     const muted = focus && !isRel && !parents.has(s.code)
     const fontSize = sceneW > 0 ? Math.round(Math.min(s.major ? 14 : 13, Math.max(9, Math.min(w, h) * 0.2))) : 11
@@ -649,32 +688,55 @@ function RelocationFloorMapImpl({
     if (!l.major) boxes.push({ id: `label:${l.code}`, kind: 'tab', x: zb.x + 3, y: zb.y + 3, ...size })
     else boxes.push({ id: `label:${l.code}`, kind: 'major', x: zb.x + zb.w - size.w - 3, y: zb.y + zb.h - size.h - 3, ...size })
   }
-  const dots: Box4[] = []
-  for (const p of pins) {
-    const size = chipSize(p.label, 11, 800, fontFamily, PIN_PAD_X, 14, 4)
+  // Arrows, before the label layout: each bows to the side whose curve crosses fewer fixed chips, edge pills and pin
+  // dots (tie: +1, left of travel; same rule for the export), then takes up space as small obstacle cells along its
+  // curve so pin captions and major labels move off it.
+  const dots: Box4[] = pins.map((p) => {
     const c = vis.map(centers.get(p.code)!)
-    boxes.push({ id: `pin:${p.code}`, kind: 'pin', dir: -1, spread: p.kind === 'old', x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h, ...size })
-    dots.push({ x: c.x - 6, y: c.y - 6, w: 12, h: 12 })
-  }
-  // Arrows, before the label layout: each bows to the side crossing fewer fixed chips / pins (tie: the default side,
-  // left of travel; export: towards the bottom of the drawing, so it does not loop up over other zones), then takes
-  // up space as small obstacle cells along its curve so pin captions and major labels move off it.
-  const fixed: Box4[] = [...boxes.filter((b) => b.kind !== 'major'), ...dots]
+    return { x: c.x - 10, y: c.y - 10, w: 20, h: 20 }
+  })
+  const fixed: Box4[] = [...boxes.filter((b) => b.kind === 'tab'), ...dots]
   const bow = exportMode ? ARROW_BOW.export : ARROW_BOW.live
+  const inner = (samples: readonly Pt[]) => samples.slice(OBSTACLE_SKIP, -OBSTACLE_SKIP).map(vis.map)
   const arrows: Arrow[] = toCenter
     ? arrowEnds.map(({ key, cross, from }) => {
-        const side = exportMode && toCenter.x > from.x ? -1 : 1
-        const [main, other] = [side * bow, -side * bow].map((b) => arrowGeometry(from, toCenter, layout.imgW, layout.imgH, b))
-        const score = (g: typeof main) => hits(g.samples.map(vis.map), fixed)
-        return { key, cross, ...(score(other) < score(main) ? other : main) }
+        const [plus, minus] = ([1, -1] as const).map((side) => arrowGeometry(from, toCenter, layout.imgW, layout.imgH, bow, side))
+        const score = (g: typeof plus) => hits(inner(g.samples), fixed)
+        return { key, cross, ...(score(minus) < score(plus) ? minus : plus) }
       })
     : []
+  // Pin captions go on the side opposite to their arrow: 'to' away from where the arrows come in, 'old' away from
+  // where its arrow leaves. Directions turn from image px to screen by the scene rotation (no skew).
+  const rad = (sceneRotation(layout.rotationDeg) * Math.PI) / 180
+  const toScreen = (d: Pt) => ({ x: d.x * Math.cos(rad) - d.y * Math.sin(rad), y: d.x * Math.sin(rad) + d.y * Math.cos(rad) })
+  const pinDir = (p: Pin): Pt | undefined => {
+    if (p.kind === 'to') {
+      const sum = arrows.reduce((acc, a) => ({ x: acc.x + a.endDir.x, y: acc.y + a.endDir.y }), { x: 0, y: 0 })
+      return Math.hypot(sum.x, sum.y) > 1e-6 ? toScreen(sum) : undefined
+    }
+    const own = p.kind === 'old' ? arrows.find((a) => !a.cross && a.key === p.code) : undefined
+    return own ? toScreen({ x: -own.startDir.x, y: -own.startDir.y }) : undefined
+  }
+  for (const p of pins) {
+    const size = chipSize(p.label, 11, 800, fontFamily, PIN_PAD_X, 14, 4)
+    const { dir, ...at } = captionBox(vis.map(centers.get(p.code)!), size, pinDir(p))
+    boxes.push({ id: `pin:${p.code}`, kind: 'pin', dir, spread: p.kind === 'old', ...at, ...size })
+  }
   arrows.forEach((a) =>
     a.samples.slice(OBSTACLE_SKIP, -OBSTACLE_SKIP).forEach((s, i) => {
       const p = vis.map(s)
       boxes.push({ id: `arrow:${a.key}:${i}`, kind: 'obstacle', x: p.x - OBSTACLE_CELL / 2, y: p.y - OBSTACLE_CELL / 2, w: OBSTACLE_CELL, h: OBSTACLE_CELL })
     }),
   )
+  // Faded (unrelated) chips that an arrow runs through are dropped; related chips always stay.
+  const arrowLines = arrows.map((a) => a.samples.map(vis.map))
+  const crossedByArrow = (l: (typeof labels)[number]) => {
+    const size = chipSize(l.text, l.fontSize, l.fontWeight, fontFamily, CHIP_PAD_X)
+    const zb = vis.box(l.box)
+    const box = l.major ? { x: zb.x + zb.w - size.w - 3, y: zb.y + zb.h - size.h - 3, ...size } : { x: zb.x + 3, y: zb.y + 3, ...size }
+    return arrowLines.some((line) => polylineHitsBox(line, box))
+  }
+  const shownLabels = labels.filter((l) => !(l.muted && crossedByArrow(l)))
   const boxesKey = JSON.stringify(boxes)
   // Dependency = the content of `boxes` (rebuilt each render), not its identity.
   const placedLabels = useMemo(() => layoutLabels(boxes, vis.bounds, 2, FOCUS.labelTries), [boxesKey, vis.bounds.w, vis.bounds.h])
@@ -702,7 +764,7 @@ function RelocationFloorMapImpl({
         parents={parents}
         hasSubs={hasSubs}
         arrows={arrows}
-        labels={labels}
+        labels={shownLabels}
         pins={pins}
         centers={centers}
         crossPills={crossPills}
@@ -895,7 +957,7 @@ function RelocationFloorMapImpl({
             </>
           }
         >
-          {labels.map((l) => {
+          {shownLabels.map((l) => {
             const at = l.major ? l.corners.br : l.corners.tl
             const placedAt = l.major ? placedTransform(`label:${l.code}`, at) : undefined
             if (placedAt?.hidden) return null

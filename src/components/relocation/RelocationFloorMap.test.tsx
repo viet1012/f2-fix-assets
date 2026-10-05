@@ -54,9 +54,10 @@ describe('RelocationFloorMap - after', () => {
     expect(zone(container, 'A2-3').classList).toContain('zone-old')
     expect(zone(container, 'A1-1').classList).toContain('zone-dim')
     expect(container.querySelector('.reloc-arrow-group')?.getAttribute('data-from')).toBe('A2-3')
-    expect(container.querySelector('.reloc-pin.pin-to .reloc-pin-label')?.textContent).toBe('3 máy')
+    expect(container.querySelector('.reloc-pin.pin-to .reloc-pin-label')?.textContent).toBe('A3-1 · 3 máy')
     expect(container.querySelector('.reloc-pin.pin-old[data-zone="A2-3"] .reloc-pin-label')?.textContent).toBe('A-006-1 +1 (cũ)')
-    expect(container.querySelector('.reloc-label[data-zone="A3-1"]')?.textContent).toBe('A3-1 · 0')
+    // No zone chip for the destination: its pin caption names the zone.
+    expect(container.querySelector('.reloc-label[data-zone="A3-1"]')).toBeNull()
   })
 
   it('zones are neutral with no machine selected, dim (focus mode) once machines are selected', () => {
@@ -255,9 +256,7 @@ describe('RelocationFloorMap - focus mode', () => {
     const muted = container.querySelector('.reloc-label[data-zone="A1-1"]')!
     expect(muted.classList).toContain('is-muted')
     expect(muted.textContent).toBe('A1-1')
-    const to = container.querySelector('.reloc-label[data-zone="A3-1"]')!
-    expect(to.classList).toContain('is-related')
-    expect(to.textContent).toBe('A3-1 · 5')
+    expect(container.querySelector('.reloc-label[data-zone="A3-1"]')).toBeNull() // Destination: the pin caption replaces the chip.
     expect(container.querySelector('.reloc-label[data-zone="A2-3"]')).toBeNull() // Old zone: the pin caption replaces the chip.
     expect(zone(container, 'A3-1').getAttribute('vector-effect')).toBe('non-scaling-stroke')
   })
@@ -435,9 +434,10 @@ describe('RelocationFloorMap - chips', () => {
     expect(container.querySelector('.pin-old[data-zone="A2-3"] .reloc-pin-label')?.textContent).toBe('A-006-1 +1 (old)')
   })
 
-  it('destination pin caption: the machine code for one machine', () => {
+  it('destination pin caption: zone code + the machine code for one machine, no zone chip', () => {
     const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={[rows[0]]} target={{ layoutId: 'floor1', zone: 'A3-1' }} onPickZone={() => {}} />)
-    expect(container.querySelector('.pin-to .reloc-pin-label')?.textContent).toBe('A-006-1')
+    expect(container.querySelector('.pin-to .reloc-pin-label')?.textContent).toBe('A3-1 · A-006-1')
+    expect(container.querySelector('.reloc-label[data-zone="A3-1"]')).toBeNull()
   })
 
   it('measures chip text with the canvas (font + text), once per pair', () => {
@@ -732,5 +732,89 @@ describe('RelocationFloorMap - tray chips', () => {
     const old = container.querySelector<HTMLElement>('.reloc-tray-zone[data-zone="A5-3"]')!
     expect(old.getAttribute('data-border')).toBe(tokens.light.relocFrom)
     expect(old.textContent).toBe('A5-3(cũ)')
+  })
+})
+
+describe('RelocationFloorMap - arrows and captions do not overlap', () => {
+  const rect = (code: string, x: number, y: number, w: number, h: number) => ({
+    code,
+    points: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }],
+  })
+  // 400 x 300 px. Source B1-1 top-left (160, 60) px, destination B1-9 bottom-right (260, 240) px; the chip of B1-5 sits on the
+  // arrow's default (+1) curve, whose middle bulges to about (223, 142) px.
+  const diag = {
+    id: 'floor1',
+    title: 'Test - D1',
+    imageData: '',
+    imgW: 400,
+    imgH: 300,
+    dbFloor: '1F',
+    zones: [],
+    areas: [rect('B1', 0, 0, 100, 100)],
+    subAreas: [rect('B1-1', 37, 17, 6, 6), rect('B1-9', 62, 77, 6, 6), rect('B1-5', 54.5, 45.3, 12, 10), rect('B1-7', 85, 5, 12, 10)],
+  } as unknown as RelocationLayout
+  const diagCtx = { layouts: [diag], index: new Map([['B1', 'floor1'], ['B1-1', 'floor1'], ['B1-5', 'floor1'], ['B1-7', 'floor1'], ['B1-9', 'floor1']] as const), zoneFac: new Map<string, string>() }
+  const props = { lang: 'vi' as const, layout: diag, layouts: [diag], role: 'after' as const, rows: [row('X-1', 'B1-1'), row('X-2', 'B1-1')], target: { layoutId: 'floor1' as const, zone: 'B1-9' }, ctx: diagCtx }
+  /** On-screen box (px) of a pin caption from its anchor and transform. */
+  const captionBox = (pin: HTMLElement) => {
+    const label = pin.querySelector<HTMLElement>('.reloc-pin-label')!
+    const [, dx, dy] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(label.style.transform)!.map(Number)
+    const cx = (parseFloat(pin.style.left) / 100) * 400
+    const cy = (parseFloat(pin.style.top) / 100) * 300
+    return { cx, cy, x: cx + dx, y: cy + dy, w: Math.ceil(label.textContent!.length * 7 + 14), h: 18 }
+  }
+  /** Points (px) of the drawn quadratic. */
+  const curve = (d: string, n = 60) => {
+    const [sx, sy, cx, cy, ex, ey] = d.match(/-?[\d.]+/g)!.map(Number)
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const t = i / n
+      const [a, b, c] = [(1 - t) ** 2, 2 * t * (1 - t), t * t]
+      return { x: ((a * sx + b * cx + c * ex) * 400) / 100, y: ((a * sy + b * cy + c * ey) * 300) / 100 }
+    })
+  }
+  const inBox = (p: { x: number; y: number }, b: { x: number; y: number; w: number; h: number }) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h
+
+  it('the head is an open polyline (no fill, no triangle polygon), live and export', () => {
+    for (const ui of [<RelocationFloorMap {...props} onPickZone={() => {}} />, <RelocationFloorMap {...props} exportMode={{ width: 400, imageHref: 'data:,' }} />]) {
+      const g = render(ui).container.querySelector('g[data-from="B1-1"]')!
+      expect(g.querySelector('polygon')).toBeNull()
+      const head = g.querySelector('.reloc-arrow-head')!
+      expect(head.tagName.toLowerCase()).toBe('polyline')
+      if (head.getAttribute('fill') !== null) expect(head.getAttribute('fill')).toBe('none')
+      else expect(['none', 'rgba(0, 0, 0, 0)']).toContain(getComputedStyle(head).getPropertyValue('fill'))
+      cleanup()
+    }
+  })
+
+  it('source top-left, destination bottom-right: the destination caption sits below its pin, to its right', () => {
+    const { container } = render(<RelocationFloorMap {...props} onPickZone={() => {}} />)
+    const to = captionBox(container.querySelector<HTMLElement>('.reloc-pin.pin-to')!)
+    expect(to.y).toBeGreaterThan(to.cy)
+    expect(to.x).toBeGreaterThan(to.cx)
+    expect(container.querySelector('.pin-to .reloc-pin-label')?.textContent).toBe('B1-9 · 2 máy')
+    // The old caption goes away from where its arrow leaves (up / left).
+    const old = captionBox(container.querySelector<HTMLElement>('.reloc-pin.pin-old')!)
+    expect(old.y + old.h).toBeLessThan(old.cy)
+    expect(old.x + old.w).toBeLessThan(old.cx)
+  })
+
+  it('no pin caption or related chip lies on the arrow', () => {
+    const { container } = render(<RelocationFloorMap {...props} highlightZone="B1-7" onPickZone={() => {}} />)
+    const pts = curve(container.querySelector('g[data-from="B1-1"] .reloc-arrow')!.getAttribute('d')!).slice(3, -3)
+    for (const pin of container.querySelectorAll<HTMLElement>('.reloc-pin')) {
+      const box = captionBox(pin)
+      expect(pts.some((p) => inBox(p, box))).toBe(false)
+    }
+  })
+
+  it('a faded chip crossed by the arrow is not drawn (live and export); chips off the line stay', () => {
+    const live = render(<RelocationFloorMap {...props} onPickZone={() => {}} />)
+    expect(live.container.querySelector('.reloc-label[data-zone="B1-5"]')).toBeNull()
+    expect(live.container.querySelector('.reloc-label[data-zone="B1-7"]')?.classList).toContain('is-muted')
+    live.unmount()
+    const exported = render(<RelocationFloorMap {...props} exportMode={{ width: 400, imageHref: 'data:,' }} />)
+    const texts = [...exported.container.querySelectorAll('text')].map((t) => t.textContent)
+    expect(texts).not.toContain('B1-5')
+    expect(texts).toContain('B1-7')
   })
 })
