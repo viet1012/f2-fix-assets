@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLOORS, type LayoutId } from '../../data/mapData'
 import { DEFAULT_CONTEXT } from '../../utils/relocation'
 import { tokens, zonePalette } from '../../theme/palette'
-import { AMBER, FOCUS, layoutLabels, measureTextWidth, RelocationFloorMap, resetTextMeasure, SLATE, type LabelBox, type RelocationLayout } from './RelocationFloorMap'
+import { AMBER, END_GAP, FOCUS, layoutLabels, START_GAP, measureTextWidth, RelocationFloorMap, resetTextMeasure, SLATE, type LabelBox, type RelocationLayout } from './RelocationFloorMap'
 
 /** Buildings come from the API fac of each zone. */
 const ctx = { ...DEFAULT_CONTEXT, zoneFac: new Map([['A2', 'Fac_A'], ['A2-3', 'Fac_A'], ['A5', 'Fac_A'], ['A5-3', 'Fac_A'], ['A15-3', 'Fac_B']]) }
@@ -319,6 +319,21 @@ describe('layoutLabels', () => {
     const out = layoutLabels([tab('a', 390, 5)], bounds)
     expect(out.get('a')).toEqual({ x: 340, y: 7, flipped: true, shifts: 0, hidden: false })
   })
+
+  it('obstacles take up space but are not in the result; captions and major labels move off them', () => {
+    const cell = (id: string, x: number, y: number): LabelBox => ({ id, kind: 'obstacle', x, y, w: 8, h: 8 })
+    // Pin caption pushed up (dir -1) off an obstacle cell, like any collision.
+    const pin: LabelBox = { id: 'p', kind: 'pin', dir: -1, x: 100, y: 100, w: 50, h: 16 }
+    const out = layoutLabels([pin, cell('o', 120, 110)], bounds)
+    expect(out.has('o')).toBe(false)
+    expect(out.get('p')).toMatchObject({ y: 82, shifts: 1, hidden: false })
+    // A spread ("(cũ)") caption tries up, then left.
+    const old: LabelBox = { ...pin, id: 'old', spread: true }
+    expect(layoutLabels([old, cell('o1', 120, 110), cell('o2', 120, 90)], bounds).get('old')).toMatchObject({ x: 48, y: 100, shifts: 2 })
+    // Major labels move up off obstacles too.
+    const major: LabelBox = { id: 'm', kind: 'major', x: 10, y: 100, w: 50, h: 16 }
+    expect(layoutLabels([major, cell('o', 20, 108)], bounds).get('m')).toMatchObject({ y: 82, shifts: 1, hidden: false })
+  })
 })
 
 describe('RelocationFloorMap - label placement', () => {
@@ -496,11 +511,12 @@ describe('RelocationFloorMap - state colours', () => {
     const arrow = container.querySelector('.reloc-arrow')!
     expect(arrow.classList).not.toContain('is-cross')
     expect(is(TO)(getComputedStyle(arrow).getPropertyValue('stroke'))).toBe(true)
-    expect(getComputedStyle(arrow).getPropertyValue('stroke-width')).toBe('2.5')
+    expect(getComputedStyle(arrow).getPropertyValue('stroke-width')).toBe('2')
+    expect(getComputedStyle(arrow).getPropertyValue('stroke-dasharray').replace(/px/g, '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim()).toBe('5 4')
     expect(container.querySelector('linearGradient')).toBeNull()
   })
 
-  it('every arrow has a solid white casing drawn before its line, live and in the export', () => {
+  it('every arrow has a solid white casing drawn before its line and its head, live and in the export', () => {
     const check = (container: HTMLElement) => {
       const groups = [...container.querySelectorAll('g[data-from]')].filter((g) => g.querySelector('.reloc-arrow'))
       expect(groups.length).toBeGreaterThan(0)
@@ -512,18 +528,39 @@ describe('RelocationFloorMap - state colours', () => {
         expect(paths[0].getAttribute('stroke-dasharray')).toBeNull()
         expect(['', 'none']).toContain(casing.getPropertyValue('stroke-dasharray'))
         expect(['', 'none']).toContain(casing.getPropertyValue('animation-name'))
+        // Head: open chevron (polyline, 3 points, no fill) over a white casing; no filled triangle.
+        expect(g.querySelector('polygon')).toBeNull()
+        const heads = [...g.querySelectorAll('polyline')]
+        expect(heads.map((h) => h.getAttribute('class'))).toEqual(['reloc-arrow-head-casing', expect.stringContaining('reloc-arrow-head')])
+        expect(heads[1].getAttribute('points')!.split(' ')).toHaveLength(3)
+        expect(heads[0].getAttribute('points')).toBe(heads[1].getAttribute('points'))
+        // jsdom reports a computed `fill: none` as transparent.
+        expect(['none', 'rgba(0, 0, 0, 0)']).toContain(heads[1].getAttribute('fill') ?? getComputedStyle(heads[1]).getPropertyValue('fill'))
       }
     }
     const props = { lang: 'vi' as const, layout: layout('floor1'), role: 'after' as const, rows, target, onPickZone: () => {} }
     const live = render(<RelocationFloorMap {...props} />)
     check(live.container)
     const head = getComputedStyle(live.container.querySelector('.reloc-arrow-head')!)
-    expect(head.getPropertyValue('stroke-width')).toBe('2')
     expect(head.getPropertyValue('stroke-width')).toBe(String(FOCUS.arrow.headStroke))
+    expect(head.getPropertyValue('stroke-linecap')).toBe('round')
+    const headCasing = getComputedStyle(live.container.querySelector('.reloc-arrow-head-casing')!)
+    expect(is('#ffffff')(headCasing.getPropertyValue('stroke'))).toBe(true)
+    expect(headCasing.getPropertyValue('stroke-width')).toBe('5')
     live.unmount()
     const exported = render(<RelocationFloorMap {...props} exportMode={{ width: 800, imageHref: 'data:,' }} />)
     check(exported.container)
-    expect(exported.container.querySelector('g[data-from] polygon')?.getAttribute('stroke')).toBe('#ffffff')
+    expect(exported.container.querySelector('g[data-from] .reloc-arrow-head-casing')?.getAttribute('stroke')).toBe('#ffffff')
+    expect(exported.container.querySelector('g[data-from] .reloc-arrow-head')?.getAttribute('stroke-width')).toBe(String(FOCUS.arrow.headStroke))
+  })
+
+  it('arrow style: 2px dashed 5 4, 5px casing, flow 1.6s, off with reduced motion', () => {
+    expect(FOCUS.arrow).toMatchObject({ strokeWidth: 2, dash: '5 4', casingWidth: 5, casingOpacity: 0.95, headLength: 9, headStroke: 2.2, flowMs: 1600, bow: { live: 0.15, export: 0.1 } })
+    const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor1')} role="after" rows={rows} target={target} onPickZone={() => {}} />)
+    const css = [...document.querySelectorAll('style')].map((s) => s.textContent).join('\n')
+    expect(css).toMatch(/reloc-flow 1600ms linear infinite/)
+    expect(css).toMatch(/prefers-reduced-motion: reduce\)\s*\{[^}]*\.reloc-arrow\s*\{[^}]*(^|[;{])animation:\s*none/)
+    expect(getComputedStyle(container.querySelector('.reloc-arrow-casing')!).getPropertyValue('stroke-width')).toBe('5')
   })
 
   it('cross arrows use the same white casing', () => {
@@ -578,9 +615,37 @@ describe('RelocationFloorMap - old zones', () => {
     const { container } = renderTight()
     const groups = [...container.querySelectorAll('.reloc-arrow-group')]
     expect(groups.map((g) => g.getAttribute('data-from')).sort()).toEqual(['B1-1', 'B1-2', 'B1-3'])
-    const ends = groups.map((g) => g.querySelector('.reloc-arrow-head')!.getAttribute('points')!.split(' ')[0].split(',').map(Number))
-    // The arrowhead tips stop just before the centre of B1-9 (50%, 85%).
-    for (const [x, y] of ends) expect(Math.hypot(((x - 50) * 400) / 100, ((y - 85) * 300) / 100)).toBeLessThan(12)
+    // Chevron points: arm, tip, arm. The tips stop END_GAP before the centre of B1-9 (50%, 85%).
+    const ends = groups.map((g) => g.querySelector('.reloc-arrow-head')!.getAttribute('points')!.split(' ')[1].split(',').map(Number))
+    for (const [x, y] of ends) expect(Math.hypot(((x - 50) * 400) / 100, ((y - 85) * 300) / 100)).toBeCloseTo(END_GAP, 1)
+  })
+
+  it('lines start START_GAP after the source pin and end END_GAP before the target pin (image px), live and export', () => {
+    const centre = { 'B1-1': [43, 40], 'B1-2': [50, 40], 'B1-3': [57, 40] } as Record<string, [number, number]>
+    const dist = (a: number[], b: number[]) => Math.hypot(((a[0] - b[0]) * 400) / 100, ((a[1] - b[1]) * 300) / 100)
+    const check = (container: HTMLElement) => {
+      const groups = [...container.querySelectorAll('g[data-from]')]
+      expect(groups).toHaveLength(3)
+      for (const g of groups) {
+        const nums = g.querySelector('.reloc-arrow')!.getAttribute('d')!.match(/-?[\d.]+/g)!.map(Number)
+        const start = nums.slice(0, 2)
+        const end = nums.slice(4, 6)
+        expect(dist(start, centre[g.getAttribute('data-from')!])).toBeGreaterThanOrEqual(START_GAP - 0.05)
+        expect(dist(end, [50, 85])).toBeGreaterThanOrEqual(END_GAP - 0.05)
+        // The chevron tip is the end of the line; each arm is headLength long.
+        const [arm, tip] = g.querySelector('.reloc-arrow-head')!.getAttribute('points')!.split(' ').map((p) => p.split(',').map(Number))
+        expect(dist(tip, end)).toBeLessThan(0.05)
+        expect(dist(arm, tip)).toBeCloseTo(FOCUS.arrow.headLength, 1)
+      }
+    }
+    const live = renderTight()
+    check(live.container)
+    live.unmount()
+    check(
+      render(
+        <RelocationFloorMap lang="vi" layout={tight} layouts={[tight]} role="after" rows={olds} target={{ layoutId: 'floor1', zone: 'B1-9' }} ctx={tightCtx} exportMode={{ width: 400, imageHref: 'data:,' }} />,
+      ).container,
+    )
   })
 
   it('"(cũ)" captions never overlap each other', () => {
@@ -599,6 +664,54 @@ describe('RelocationFloorMap - old zones', () => {
         const [a, b] = [boxes[i], boxes[j]]
         expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false)
       }
+  })
+})
+
+describe('RelocationFloorMap - arrows avoid chips', () => {
+  const rect = (code: string, x: number, y: number, w: number, h: number) => ({
+    code,
+    points: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }],
+  })
+  // 400 x 300 px. Old zone B1-1 at (100, 150) px, destination B1-9 at (240, 150) px; the chip of the flashed zone
+  // B1-5 ("B1-5 · 0", 66 x 17 px at 137, 138) sits on the straight line between the pins, just above it.
+  const line = {
+    id: 'floor1',
+    title: 'Test - L1',
+    imageData: '',
+    imgW: 400,
+    imgH: 300,
+    dbFloor: '1F',
+    zones: [],
+    areas: [rect('B1', 0, 0, 100, 100)],
+    subAreas: [rect('B1-1', 22, 47, 6, 6), rect('B1-9', 57, 47, 6, 6), rect('B1-5', 33.5, 45, 20, 10)],
+  } as unknown as RelocationLayout
+  const lineCtx = { layouts: [line], index: new Map([['B1', 'floor1'], ['B1-1', 'floor1'], ['B1-5', 'floor1'], ['B1-9', 'floor1']] as const), zoneFac: new Map<string, string>() }
+  const chip = { x: 137, y: 138, w: 66, h: 17 }
+  const inChip = (p: { x: number; y: number }) => p.x >= chip.x && p.x <= chip.x + chip.w && p.y >= chip.y && p.y <= chip.y + chip.h
+  /** Points of the drawn quadratic, in px. */
+  const curve = (d: string) => {
+    const [sx, sy, cx, cy, ex, ey] = d.match(/-?[\d.]+/g)!.map(Number)
+    return Array.from({ length: 101 }, (_, i) => {
+      const t = i / 100
+      const [a, b, c] = [(1 - t) ** 2, 2 * t * (1 - t), t * t]
+      return { x: ((a * sx + b * cx + c * ex) * 400) / 100, y: ((a * sy + b * cy + c * ey) * 300) / 100, cy }
+    })
+  }
+  const props = { lang: 'vi' as const, layout: line, layouts: [line], role: 'after' as const, rows: [row('X-1', 'B1-1')], target: { layoutId: 'floor1' as const, zone: 'B1-9' }, highlightZone: 'B1-5', ctx: lineCtx }
+
+  it('bows to the side that does not cross the chip on the straight line, live and export', () => {
+    // The straight line between the pins runs through the chip.
+    expect(Array.from({ length: 51 }, (_, i) => ({ x: 100 + (140 * i) / 50, y: 150 })).some(inChip)).toBe(true)
+    const live = render(<RelocationFloorMap {...props} onPickZone={() => {}} />)
+    // The chip really is where expected (a fixed tab).
+    const label = live.container.querySelector<HTMLElement>('.reloc-label[data-zone="B1-5"] .reloc-label-text')!
+    expect(label.textContent).toBe('B1-5 · 0')
+    for (const container of [live.container, render(<RelocationFloorMap {...props} exportMode={{ width: 400, imageHref: 'data:,' }} />).container]) {
+      const pts = curve(container.querySelector('g[data-from="B1-1"] .reloc-arrow')!.getAttribute('d')!)
+      // Default side (left of travel = up) would cross the chip: it bows down instead, clear of it.
+      expect(pts[0].cy).toBeGreaterThan(50)
+      expect(pts.some(inChip)).toBe(false)
+    }
   })
 })
 

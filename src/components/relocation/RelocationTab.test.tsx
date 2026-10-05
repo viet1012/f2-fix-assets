@@ -73,7 +73,7 @@ describe('RelocationTab with the location API', () => {
     expect(container.querySelector('.reloc-zone[data-zone="A3-1"]')?.classList).toContain('zone-dim')
     expect(container.querySelector('.reloc-zone[data-zone="A2-3"]')?.classList).toContain('zone-from')
     expect(screen.queryByTestId('unplaced-zones')).toBeNull()
-  })
+  }, HEAVY_TEST_MS)
 
   it('rejects a machine at an Outside location with its own message', async () => {
     mockFetch()
@@ -405,7 +405,6 @@ describe('RelocationTab - guided flow', () => {
     fireEvent.click(screen.getByRole('option', { name: /A-006-1/ }))
     expect(screen.getByTestId('selected-count').textContent).toBe('1')
     expect(active()).toBe(machineInput())
-    expect(screen.getByTestId('reloc-dest').getAttribute('data-pulse')).toBe('true')
     expect(screen.getByTestId('reloc-next-hint').textContent).toBe('Đã chọn 1 máy. Tiếp theo: chọn vị trí đích.')
     expect(stepState(1)).toBe('active')
     expect(screen.getByTestId('reloc-step-summary-1').textContent).toBe('· 1 máy')
@@ -473,6 +472,109 @@ describe('RelocationTab - guided flow', () => {
     expect((screen.getByRole('combobox', { name: 'Zone', hidden: true }) as HTMLInputElement).value).toBe('')
     expect(screen.getByRole('combobox', { name: 'Tầng / Khu', hidden: true }).textContent).not.toContain('Guide')
   }, HEAVY_TEST_MS)
+
+  const cardOf = (testId: string) => screen.getByTestId(testId).closest<HTMLElement>('.MuiCard-root')!
+  /** matchMedia (reduced motion) and CSS.registerProperty (@property support) for the running ring. */
+  const motion = (reduced: boolean) => {
+    vi.stubGlobal('CSS', { registerProperty: vi.fn(), supports: () => true, escape: (v: string) => v })
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (q: string) => ({ matches: reduced && q.includes('reduce'), media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }),
+    })
+  }
+  afterEach(() => {
+    delete (window as { matchMedia?: unknown }).matchMedia
+  })
+
+  it('chevron stepper: aria-current on the active step only; a click scrolls to its card', async () => {
+    mockFetch()
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    try {
+      render(<RelocationTab lang="vi" account="E001" />)
+      await screen.findByLabelText('Chọn máy')
+      const buttons = () => within(screen.getByTestId('reloc-stepper')).getAllByRole('button')
+      expect(buttons().map((b) => b.getAttribute('aria-current'))).toEqual(['step', null, null])
+      pasteCodes('A-006-1 A-006-2')
+      fireEvent.click(screen.getByRole('button', { name: 'Tiếp: Chọn vị trí đích →' }))
+      fireEvent.keyDown(screen.getAllByRole('option')[0], { key: 'Escape' })
+      expect(buttons().map((b) => b.getAttribute('aria-current'))).toEqual([null, 'step', null])
+      expect(buttons()[0].getAttribute('data-state')).toBe('done')
+      scroll.mockClear()
+      fireEvent.click(buttons()[2])
+      expect(scroll).toHaveBeenCalledTimes(1)
+      expect(scroll.mock.contexts[0]).toBe(screen.getByLabelText('Thông tin yêu cầu').closest('.MuiCard-root'))
+      expect(buttons()[2].getAttribute('aria-current')).toBe('step')
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('the card of a step that just became active gets the running ring, then keeps the static one', async () => {
+    mockFetch()
+    motion(false)
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    const pick = screen.getByLabelText('Chọn máy').closest<HTMLElement>('.MuiCard-root')!
+    // Initial step: static ring, no run on mount.
+    expect(pick.classList).toContain('reloc-step-active')
+    expect(pick.classList).not.toContain('is-running')
+    pasteCodes('A-006-1 A-006-2')
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Tiếp: Chọn vị trí đích →' }))
+      const dest = cardOf('reloc-dest')
+      expect(dest.classList).toContain('reloc-step-active')
+      expect(dest.classList).toContain('is-running')
+      expect(pick.classList).not.toContain('reloc-step-active')
+      // Drawn inside the card: it keeps overflow hidden.
+      expect(getComputedStyle(dest).overflow).toBe('hidden')
+      // Keeps running (the step change's own focus does not count) until the user focuses the card.
+      act(() => vi.advanceTimersByTime(5000))
+      expect(dest.classList).toContain('is-running')
+      fireEvent.focusIn(screen.getByRole('combobox', { name: 'Toà nhà', hidden: true }))
+      expect(dest.classList).not.toContain('is-running')
+      expect(dest.classList).toContain('reloc-step-active')
+      // Without interaction it stops after 20s.
+      fireEvent.click(within(screen.getByTestId('reloc-stepper')).getAllByRole('button', { hidden: true })[2])
+      const form = screen.getByLabelText('Thông tin yêu cầu', { selector: 'form' }).closest<HTMLElement>('.MuiCard-root')!
+      expect(form.classList).toContain('is-running')
+      act(() => vi.advanceTimersByTime(19999))
+      expect(form.classList).toContain('is-running')
+      act(() => vi.advanceTimersByTime(1))
+      expect(form.classList).not.toContain('is-running')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reduced motion: static ring only, no running animation', async () => {
+    mockFetch()
+    motion(true)
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    pasteCodes('A-006-1 A-006-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Tiếp: Chọn vị trí đích →' }))
+    const dest = cardOf('reloc-dest')
+    expect(dest.classList).toContain('reloc-step-active')
+    expect(document.querySelector('.is-running')).toBeNull()
+    // Static ring + glow instead.
+    expect(dest.classList).toContain('is-glow')
+  })
+
+  it('compact stepper: fits its content (no flex: 1 / width: 100%), 28px chevrons with a title', async () => {
+    mockFetch()
+    render(<RelocationTab lang="vi" account="E001" />)
+    await screen.findByLabelText('Chọn máy')
+    const stepper = screen.getByTestId('reloc-stepper')
+    expect(getComputedStyle(stepper.querySelector('ol')!).display).toBe('inline-flex')
+    for (const li of stepper.querySelectorAll('li')) expect(getComputedStyle(li).flexGrow).not.toBe('1')
+    for (const b of within(stepper).getAllByRole('button')) {
+      expect(getComputedStyle(b).width).not.toBe('100%')
+      expect(getComputedStyle(b).height).toBe('28px')
+    }
+    expect(within(stepper).getAllByRole('button').map((b) => b.getAttribute('title'))).toEqual(['Chọn máy', 'Vị trí đích', 'Thông tin & gửi'])
+  })
 
   it('stepper is localized (en) and a click activates the step', async () => {
     mockFetch()

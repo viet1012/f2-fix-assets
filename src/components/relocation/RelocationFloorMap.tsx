@@ -105,8 +105,22 @@ export const FOCUS = {
   /** Old zone: pale amber fill, dashed amber stroke; chip "A-341 (cũ)" pale amber with dark ink; hollow pin. */
   old: { color: AMBER.base, fill: 0.25, stroke: AMBER.base, strokeWidth: 2, dash: '6 4', chipBg: AMBER.paper, chipInk: AMBER.ink, pinBorder: 2.5 },
   to: { color: MAP.relocTo, fill: 0.75, stroke: '#065f46', strokeWidth: 2.5 },
-  /** White casing under the dashed line (solid, still) and a white outline on the head, so arrows read over the drawing. */
-  arrow: { strokeWidth: 2.5, dash: '8 6', casingWidth: 6, casingColor: '#ffffff', casingOpacity: 0.95, headStroke: 2 },
+  /**
+   * Dashed line over a solid white casing (still), open chevron head (same colour, white casing under it), so arrows
+   * read over the drawing. `bow`: control-point offset (share of the length), live map / export (flatter).
+   */
+  arrow: {
+    strokeWidth: 2,
+    dash: '5 4',
+    casingWidth: 5,
+    casingColor: '#ffffff',
+    casingOpacity: 0.95,
+    headLength: 9,
+    headAngle: 70,
+    headStroke: 2.2,
+    flowMs: 1600,
+    bow: { live: 0.15, export: 0.1 },
+  },
   /** Tries per pin caption to get out of an overlap ("(cũ)" chips: up/down, left, right). */
   labelTries: 4,
   transitionMs: 200,
@@ -121,11 +135,18 @@ const TRANSITION = ['opacity', 'fill', 'fill-opacity', 'stroke', 'stroke-opacity
 const PIN_GAP = 9
 const EDGE_INSET = 8
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)'
+/** One dash + gap of the arrow line: the flow animation moves it by exactly one period. */
+const dashPeriod = FOCUS.arrow.dash.split(' ').reduce((s, n) => s + Number(n), 0)
 /** States that are part of the move: drawn on top, with halo and solid chip. */
 const RELATED: ReadonlySet<ZoneState> = new Set<ZoneState>(['from', 'to', 'old'])
-/** Arrowhead length and the gap kept before the target pin, in image pixels. */
-const HEAD = 12
-const GAP = 10
+/** Gaps kept between the arrow and the centres of its source / target pins, in image pixels. */
+export const START_GAP = 10
+export const END_GAP = 12
+/** Points sampled along an arrow (side choice, label obstacles); size (px) of an obstacle cell around each sample. */
+const ARROW_SAMPLES = 24
+const OBSTACLE_CELL = 8
+/** Samples next to the pins that are not label obstacles (the pin's own caption sits there). */
+const OBSTACLE_SKIP = 2
 /** Sub-zone labels are hidden below this rendered size (px). */
 const MIN_LABEL_W = 44
 /** Horizontal padding (px) of zone chips and pin captions; used both in the styles and when measuring. */
@@ -174,8 +195,11 @@ function visualCorners(b: Box4, rotation: number, imgW: number, imgH: number) {
 
 export interface LabelBox {
   id: string
-  /** tab: chip of a related zone (fixed); pin: pin caption (pushed down); major: major-area label (pushed up, else hidden). */
-  kind: 'tab' | 'pin' | 'major'
+  /**
+   * tab: chip of a related zone (fixed); pin: pin caption (pushed down); major: major-area label (pushed up, else
+   * hidden); obstacle: space taken by something else (an arrow), placed first, never moved, not in the result.
+   */
+  kind: 'tab' | 'pin' | 'major' | 'obstacle'
   /** Desired top-left and size in on-screen px. A tab's desired y is just above its zone's top edge. */
   x: number
   y: number
@@ -207,14 +231,18 @@ const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: num
  * never move (flipped inside their zone when above the image edge); pin captions are pushed down (or up, `dir: -1`),
  * major labels pushed up, at most `maxTries` times each (leaving the image counts as a collision). `spread` captions
  * also try left / right. A major label that is still blocked is hidden; a pin caption keeps its last position (a
- * `spread` one goes back to where it was asked).
+ * `spread` one goes back to where it was asked). Obstacles only take up space, as they are.
  */
 export function layoutLabels(boxes: readonly LabelBox[], bounds: { w: number; h: number }, gap = 2, maxTries = 3): Map<string, PlacedLabel> {
   const out = new Map<string, PlacedLabel>()
   const placed: { x: number; y: number; w: number; h: number }[] = []
   const clampX = (b: LabelBox) => Math.max(0, Math.min(b.x, bounds.w - b.w))
-  const order = { tab: 0, pin: 1, major: 2 } as const
+  const order = { obstacle: 0, tab: 1, pin: 2, major: 3 } as const
   for (const b of [...boxes].sort((a, c) => order[a.kind] - order[c.kind])) {
+    if (b.kind === 'obstacle') {
+      placed.push({ x: b.x, y: b.y, w: b.w, h: b.h })
+      continue
+    }
     const x = clampX(b)
     if (b.kind === 'tab') {
       const flipped = b.y < 0
@@ -315,36 +343,59 @@ function placeName(layout: RelocationLayout, fac: string | null, vi: boolean) {
   return layout.title.split(' - ').pop() ?? layout.title
 }
 
-/** Control-point offset of same-layout arrows (share of their length): live map / export (flatter, lift <= 15%). */
-export const ARROW_BOW = { live: 0.22, export: 0.12 } as const
+/** Control-point offset of the arrows (share of their length): live map / export (flatter). */
+export const ARROW_BOW = FOCUS.arrow.bow
+
+type Pt = { x: number; y: number }
 
 /**
- * Curved arrow (quadratic, bowed to the left of travel) from a to b, in the 0-100 viewBox. Geometry is computed in
- * image pixels so the curve and head keep their shape although the viewBox is stretched to the image aspect ratio.
- * `downward`: bow towards the bottom of the drawing instead (export: the arrow does not loop up over other zones).
+ * Curved arrow (quadratic) from a to b, in the 0-100 viewBox, bowed to the left of travel (`bow` > 0) or to the right
+ * (`bow` < 0). It starts START_GAP after the source pin centre and ends END_GAP before the target pin centre (along
+ * the tangent), so it never runs into the dots. The head is an open chevron whose tip is the end of the line.
+ * Geometry is computed in image pixels so the curve and head keep their shape although the viewBox is stretched to
+ * the image aspect ratio. `samples`: ARROW_SAMPLES points along the drawn curve, in scene %.
  */
-function arrowGeometry(a: { x: number; y: number }, b: { x: number; y: number }, imgW: number, imgH: number, bow: number = ARROW_BOW.live, downward = false) {
-  const toPx = (p: { x: number; y: number }) => ({ x: (p.x * imgW) / 100, y: (p.y * imgH) / 100 })
-  const toPct = (p: { x: number; y: number }) => `${((p.x / imgW) * 100).toFixed(3)},${((p.y / imgH) * 100).toFixed(3)}`
+function arrowGeometry(a: Pt, b: Pt, imgW: number, imgH: number, bow: number) {
+  const toPx = (p: Pt) => ({ x: (p.x * imgW) / 100, y: (p.y * imgH) / 100 })
+  const toScene = (p: Pt) => ({ x: (p.x / imgW) * 100, y: (p.y / imgH) * 100 })
+  const toPct = (p: Pt) => `${((p.x / imgW) * 100).toFixed(3)},${((p.y / imgH) * 100).toFixed(3)}`
+  const unit = (from: Pt, to: Pt) => {
+    const l = Math.hypot(to.x - from.x, to.y - from.y) || 1
+    return { x: (to.x - from.x) / l, y: (to.y - from.y) / l }
+  }
   const p0 = toPx(a)
   const p2 = toPx(b)
   const dx = p2.x - p0.x
   const dy = p2.y - p0.y
-  const len = Math.hypot(dx, dy) || 1
-  const flip = downward && -dx / len < 0 ? -1 : 1
-  const c = { x: (p0.x + p2.x) / 2 + flip * dy * bow, y: (p0.y + p2.y) / 2 - flip * dx * bow }
-  const tx = p2.x - c.x
-  const ty = p2.y - c.y
-  const tl = Math.hypot(tx, ty) || 1
-  const ux = tx / tl
-  const uy = ty / tl
-  const tip = { x: p2.x - ux * GAP, y: p2.y - uy * GAP }
-  const base = { x: tip.x - ux * HEAD, y: tip.y - uy * HEAD }
-  const half = HEAD * 0.55
-  return {
-    d: `M${toPct(p0)} Q${toPct(c)} ${toPct(base)}`,
-    head: [tip, { x: base.x - uy * half, y: base.y + ux * half }, { x: base.x + uy * half, y: base.y - ux * half }].map(toPct).join(' '),
+  const c = { x: (p0.x + p2.x) / 2 + dy * bow, y: (p0.y + p2.y) / 2 - dx * bow }
+  const u0 = unit(p0, c)
+  const u1 = unit(c, p2)
+  const start = { x: p0.x + u0.x * START_GAP, y: p0.y + u0.y * START_GAP }
+  const end = { x: p2.x - u1.x * END_GAP, y: p2.y - u1.y * END_GAP }
+  // Chevron: two arms of headLength going back from the tip, headAngle apart.
+  const half = ((FOCUS.arrow.headAngle / 2) * Math.PI) / 180
+  const arm = (s: 1 | -1) => {
+    const cos = Math.cos(s * half)
+    const sin = Math.sin(s * half)
+    return { x: end.x - FOCUS.arrow.headLength * (u1.x * cos - u1.y * sin), y: end.y - FOCUS.arrow.headLength * (u1.x * sin + u1.y * cos) }
   }
+  const samples = Array.from({ length: ARROW_SAMPLES }, (_, i) => {
+    const t = i / (ARROW_SAMPLES - 1)
+    const k0 = (1 - t) * (1 - t)
+    const k1 = 2 * t * (1 - t)
+    const k2 = t * t
+    return toScene({ x: k0 * start.x + k1 * c.x + k2 * end.x, y: k0 * start.y + k1 * c.y + k2 * end.y })
+  })
+  return {
+    d: `M${toPct(start)} Q${toPct(c)} ${toPct(end)}`,
+    head: [arm(1), end, arm(-1)].map(toPct).join(' '),
+    samples,
+  }
+}
+
+/** Number of points (on-screen px) inside any of the boxes. */
+function hits(points: readonly Pt[], boxes: readonly Box4[]) {
+  return points.filter((p) => boxes.some((o) => p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h)).length
 }
 
 interface Shape {
@@ -369,7 +420,9 @@ interface Arrow {
   /** From another layout (purple) instead of an old zone on this one (green). */
   cross: boolean
   d: string
+  /** Chevron points (arm, tip, arm). */
   head: string
+  samples: Pt[]
 }
 
 interface CrossPill {
@@ -534,19 +587,7 @@ function RelocationFloorMapImpl({
             .map(([zone, rs]) => ({ code: zone, kind: 'old' as const, label: `${pinLabel(rs)} (${vi ? 'cũ' : 'old'})` })),
         ]
 
-  // Same-layout arrows (After): green, dashed, curved, from each old zone to the destination.
   const toCenter = role === 'after' && toZone ? centers.get(toZone) : undefined
-  const arrows: Arrow[] = toCenter
-    ? [...placed.keys()]
-        .filter((zone) => zone !== toZone && centers.has(zone))
-        .map((zone) => ({
-          key: zone,
-          cross: false,
-          ...(exportMode
-            ? arrowGeometry(centers.get(zone)!, toCenter, layout.imgW, layout.imgH, ARROW_BOW.export, true)
-            : arrowGeometry(centers.get(zone)!, toCenter, layout.imgW, layout.imgH)),
-        }))
-    : []
 
   // On-screen px layout (a nominal width until the scene is measured, e.g. in tests).
   const fontFamily = exportMode ? EXPORT_FONT : String(theme.typography.fontFamily)
@@ -557,6 +598,10 @@ function RelocationFloorMapImpl({
 
   // After map, machines coming from other layouts: purple pills on the left edge + dashed purple arrows to the target.
   const crossPills: CrossPill[] = []
+  /** Arrow ends (scene %): same-layout (green, from each old zone) and cross-layout (purple, from each edge pill). */
+  const arrowEnds: { key: string; cross: boolean; from: Pt }[] = toCenter
+    ? [...placed.keys()].filter((zone) => zone !== toZone && centers.has(zone)).map((zone) => ({ key: zone, cross: false, from: centers.get(zone)! }))
+    : []
   if (role === 'after' && toZone) {
     const sources = [...groups].flatMap(([id, byZone]) => {
       const from = id === null || id === layout.id ? undefined : layoutOf(id)
@@ -571,7 +616,7 @@ function RelocationFloorMapImpl({
       const y = Math.max(half + 4, Math.min(vis.bounds.h - half - 4, dest.y + (i - (sources.length - 1) / 2) * (size.h + 6)))
       const anchor = vis.unmap({ x: EDGE_INSET, y })
       crossPills.push({ key: src.id, text: src.text, anchor, box: { x: EDGE_INSET, y: y - half, ...size } })
-      if (toCenter) arrows.push({ key: `layout:${src.id}`, cross: true, ...arrowGeometry(vis.unmap({ x: EDGE_INSET + size.w + 4, y }), toCenter, layout.imgW, layout.imgH) })
+      if (toCenter) arrowEnds.push({ key: `layout:${src.id}`, cross: true, from: vis.unmap({ x: EDGE_INSET + size.w + 4, y }) })
     })
   }
   // Before map, destination on another layout: purple pill on the right edge.
@@ -604,11 +649,32 @@ function RelocationFloorMapImpl({
     if (!l.major) boxes.push({ id: `label:${l.code}`, kind: 'tab', x: zb.x + 3, y: zb.y + 3, ...size })
     else boxes.push({ id: `label:${l.code}`, kind: 'major', x: zb.x + zb.w - size.w - 3, y: zb.y + zb.h - size.h - 3, ...size })
   }
+  const dots: Box4[] = []
   for (const p of pins) {
     const size = chipSize(p.label, 11, 800, fontFamily, PIN_PAD_X, 14, 4)
     const c = vis.map(centers.get(p.code)!)
     boxes.push({ id: `pin:${p.code}`, kind: 'pin', dir: -1, spread: p.kind === 'old', x: c.x - size.w / 2, y: c.y - PIN_GAP - size.h, ...size })
+    dots.push({ x: c.x - 6, y: c.y - 6, w: 12, h: 12 })
   }
+  // Arrows, before the label layout: each bows to the side crossing fewer fixed chips / pins (tie: the default side,
+  // left of travel; export: towards the bottom of the drawing, so it does not loop up over other zones), then takes
+  // up space as small obstacle cells along its curve so pin captions and major labels move off it.
+  const fixed: Box4[] = [...boxes.filter((b) => b.kind !== 'major'), ...dots]
+  const bow = exportMode ? ARROW_BOW.export : ARROW_BOW.live
+  const arrows: Arrow[] = toCenter
+    ? arrowEnds.map(({ key, cross, from }) => {
+        const side = exportMode && toCenter.x > from.x ? -1 : 1
+        const [main, other] = [side * bow, -side * bow].map((b) => arrowGeometry(from, toCenter, layout.imgW, layout.imgH, b))
+        const score = (g: typeof main) => hits(g.samples.map(vis.map), fixed)
+        return { key, cross, ...(score(other) < score(main) ? other : main) }
+      })
+    : []
+  arrows.forEach((a) =>
+    a.samples.slice(OBSTACLE_SKIP, -OBSTACLE_SKIP).forEach((s, i) => {
+      const p = vis.map(s)
+      boxes.push({ id: `arrow:${a.key}:${i}`, kind: 'obstacle', x: p.x - OBSTACLE_CELL / 2, y: p.y - OBSTACLE_CELL / 2, w: OBSTACLE_CELL, h: OBSTACLE_CELL })
+    }),
+  )
   const boxesKey = JSON.stringify(boxes)
   // Dependency = the content of `boxes` (rebuilt each render), not its identity.
   const placedLabels = useMemo(() => layoutLabels(boxes, vis.bounds, 2, FOCUS.labelTries), [boxesKey, vis.bounds.w, vis.bounds.h])
@@ -708,9 +774,9 @@ function RelocationFloorMapImpl({
               strokeLinecap: 'round',
               vectorEffect: 'non-scaling-stroke',
               strokeDasharray: FOCUS.arrow.dash,
-              animation: 'reloc-flow 1s linear infinite',
+              animation: `reloc-flow ${FOCUS.arrow.flowMs}ms linear infinite`,
             },
-            '& .reloc-arrow-casing': {
+            '& .reloc-arrow-casing, & .reloc-arrow-head-casing': {
               fill: 'none',
               stroke: FOCUS.arrow.casingColor,
               strokeOpacity: FOCUS.arrow.casingOpacity,
@@ -719,10 +785,9 @@ function RelocationFloorMapImpl({
               strokeLinejoin: 'round',
               vectorEffect: 'non-scaling-stroke',
             },
-            '& .reloc-arrow-head': { fill: TO, stroke: FOCUS.arrow.casingColor, strokeWidth: FOCUS.arrow.headStroke, strokeLinejoin: 'round', paintOrder: 'stroke' },
-            '& .reloc-arrow.is-cross': { stroke: CROSS },
-            '& .reloc-arrow-head.is-cross': { fill: CROSS },
-            '@keyframes reloc-flow': { to: { strokeDashoffset: -14 } },
+            '& .reloc-arrow-head': { fill: 'none', stroke: TO, strokeWidth: FOCUS.arrow.headStroke, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke' },
+            '& .reloc-arrow.is-cross, & .reloc-arrow-head.is-cross': { stroke: CROSS },
+            '@keyframes reloc-flow': { to: { strokeDashoffset: -dashPeriod } },
             '@keyframes reloc-pulse': { '0%': { transform: 'translate(-50%, -50%) scale(1)', opacity: 0.55 }, '100%': { transform: 'translate(-50%, -50%) scale(2.6)', opacity: 0 } },
             // Anchors: zero-size points in scene %, moving with the (rotated) scene; their content is counter-rotated.
             '& .reloc-pin, & .reloc-label, & .reloc-anchor': { position: 'absolute', width: 0, height: 0, pointerEvents: 'none' },
@@ -823,7 +888,8 @@ function RelocationFloorMapImpl({
                 <g key={`arrow-${a.key}`} className="reloc-arrow-group" data-from={a.key}>
                   <path className="reloc-arrow-casing" d={a.d} />
                   <path className={`reloc-arrow${a.cross ? ' is-cross' : ''}`} d={a.d} />
-                  <polygon className={`reloc-arrow-head${a.cross ? ' is-cross' : ''}`} points={a.head} />
+                  <polyline className="reloc-arrow-head-casing" points={a.head} />
+                  <polyline className={`reloc-arrow-head${a.cross ? ' is-cross' : ''}`} points={a.head} />
                 </g>
               ))}
             </>
@@ -1024,7 +1090,8 @@ function ExportSvg({ exportMode, layout, vis, W, H, focus, layers, states, relat
             <g key={`arrow-${a.key}`} data-from={a.key}>
               <path className="reloc-arrow-casing" d={a.d} fill="none" stroke={FOCUS.arrow.casingColor} strokeOpacity={FOCUS.arrow.casingOpacity} strokeWidth={FOCUS.arrow.casingWidth} strokeLinecap="round" strokeLinejoin="round" {...nonScaling} />
               <path className="reloc-arrow" d={a.d} fill="none" stroke={a.cross ? CROSS : TO} strokeWidth={FOCUS.arrow.strokeWidth} strokeLinecap="round" strokeDasharray={FOCUS.arrow.dash} {...nonScaling} />
-              <polygon points={a.head} fill={a.cross ? CROSS : TO} stroke={FOCUS.arrow.casingColor} strokeWidth={FOCUS.arrow.headStroke} strokeLinejoin="round" paintOrder="stroke" />
+              <polyline className="reloc-arrow-head-casing" points={a.head} fill="none" stroke={FOCUS.arrow.casingColor} strokeOpacity={FOCUS.arrow.casingOpacity} strokeWidth={FOCUS.arrow.casingWidth} strokeLinecap="round" strokeLinejoin="round" {...nonScaling} />
+              <polyline className="reloc-arrow-head" points={a.head} fill="none" stroke={a.cross ? CROSS : TO} strokeWidth={FOCUS.arrow.headStroke} strokeLinecap="round" strokeLinejoin="round" {...nonScaling} />
             </g>
           ))}
         </g>

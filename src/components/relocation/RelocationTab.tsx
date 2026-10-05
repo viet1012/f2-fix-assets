@@ -1,5 +1,5 @@
-import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, Link, Stack, Switch, Typography, type Theme } from '@mui/material'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, GlobalStyles, Link, Stack, Switch, Typography, type Theme } from '@mui/material'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { facLabel } from '../../config/relocation'
 import { FLOORS, ZONE_INDEX, type LayoutId } from '../../data/mapData'
 import { useAssetsWithLocation, useLocations } from '../../hooks/useLocations'
@@ -19,6 +19,7 @@ import { EMPTY_FORM, todayIso, validateRelocationForm, type RelocationFormValues
 import { downloadBlob, exportRelocationPng, snapshotExportInput, type RelocationExportInput } from '../../utils/exportRelocationPng'
 import { buildRequestItems, pendingCodesOf, rowsInZone, sourceZonesByFac } from '../../utils/relocationInput'
 import { SectionCard } from '../common/SectionCard'
+import CheckRounded from '@mui/icons-material/CheckRounded'
 import MapOutlined from '@mui/icons-material/MapOutlined'
 import { createScrollSync, DEFAULT_MAP_VIEW, type MapView } from '../map/MapScene'
 import { ErrorState, LoadingState } from '../common/States'
@@ -41,15 +42,53 @@ function scrollToCard(el: HTMLElement | null) {
   const card = el?.closest<HTMLElement>('.MuiCard-root') ?? el
   card?.scrollIntoView?.({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' })
 }
-/** Card of the active step: 2px primary frame (outline: no layout shift). */
-const activeCardSx = (t: Theme) => ({ outline: `2px solid ${t.palette.primary.main}`, outlineOffset: '-2px' })
-/** Destination hint once machines are picked: the frame flashes twice (~1.2s), off with reduced motion. */
-const PULSE_MS = 1200
-const pulseCardSx = (t: Theme) => ({
-  '@keyframes relocDestPulse': { '0%, 100%': { boxShadow: `0 0 0 0 ${alpha(t.palette.primary.main, 0)}` }, '50%': { boxShadow: `0 0 0 4px ${alpha(t.palette.primary.main, 0.5)}` } },
-  animation: `relocDestPulse ${PULSE_MS / 2}ms ease-in-out 2`,
-  '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
-})
+/**
+ * Card of the active step: a static 2px primary ring drawn inside the card (::before masked to its padding, so the
+ * card keeps overflow: hidden). When a step becomes active, two comets (bright head, long tail; the second one 180°
+ * behind and fainter) run round a faint 3px track with a soft glow, until the user interacts with the card or
+ * RING_MAX_MS; then the static ring stays. Without @property support or with reduced motion: static ring + glow.
+ */
+const RING_TURN_MS = 4000
+const RING_MAX_MS = 20000
+/** User interaction with the card that stops the run (attached after the programmatic focus of the step change). */
+const RING_STOP_EVENTS = ['focusin', 'pointerdown', 'click', 'input', 'change'] as const
+const canRunRing = () => !reducedMotion() && typeof CSS !== 'undefined' && typeof CSS.registerProperty === 'function'
+const RING_PROPERTY = '@property --reloc-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }'
+const RING_MASK = 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)'
+const ringStyles = (t: Theme) => {
+  const c = t.palette.primary.main
+  const head = t.palette.mode === 'dark' ? t.palette.primary.light : c
+  /** Comet starting `offset` degrees round, colours scaled by `k` (1 = main comet). */
+  const comet = (offset: number, k: number) =>
+    `conic-gradient(from calc(var(--reloc-angle) + ${offset}deg), transparent 0 55%, ${alpha(head, 0.35 * k)} 75%, ${alpha(head, k)} 92%, ${alpha('#ffffff', k)} 95%, ${alpha(head, k)} 97%, transparent 100%)`
+  const glow = `inset 0 0 0 1px ${alpha(c, 0.4)}, 0 0 12px ${alpha(c, 0.15)}`
+  const lit = '.reloc-step-card.reloc-step-active, .reloc-step-card.is-running, .reloc-step-card.is-glow'
+  return {
+    '@keyframes relocRingSpin': { to: { '--reloc-angle': '360deg' } },
+    [lit]: { position: 'relative' },
+    [lit.split(', ').map((x) => `${x}::before`).join(', ')]: {
+      content: '""',
+      position: 'absolute',
+      inset: 0,
+      padding: '2px',
+      borderRadius: 'inherit',
+      pointerEvents: 'none',
+      zIndex: 2,
+      background: c,
+      WebkitMask: RING_MASK,
+      mask: RING_MASK,
+      WebkitMaskComposite: 'xor',
+      maskComposite: 'exclude',
+    },
+    '.reloc-step-card.is-running, .reloc-step-card.is-glow': { boxShadow: glow },
+    '.reloc-step-card.is-running::before': {
+      padding: '3px',
+      background: `${comet(0, 1)}, ${comet(180, 0.5)}, ${alpha(c, 0.25)}`,
+      animation: `relocRingSpin ${RING_TURN_MS}ms cubic-bezier(0.37, 0, 0.63, 1) infinite`,
+    },
+    '@media (prefers-reduced-motion: reduce)': { '.reloc-step-card.is-running::before': { animation: 'none', padding: '2px', background: c } },
+  }
+}
 
 type Step = 1 | 2 | 3
 interface StepItem {
@@ -59,52 +98,70 @@ interface StepItem {
   done: boolean
 }
 
-/** (1) Pick machines (2) Destination (3) Details & submit: a click scrolls to the step's card. */
+/** Chevron arrow (9px point); every item after the first also has the matching notch on its left. */
+const CHEVRON_FIRST = 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)'
+const CHEVRON_NEXT = 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%, 9px 50%)'
+
+/** Compact closed chevron process (1) Pick machines (2) Destination (3) Details & submit: a click scrolls to the step's card. */
 function RelocationStepper({ lang, steps, active, onPick }: { lang: Lang; steps: readonly StepItem[]; active: Step; onPick: (step: Step) => void }) {
   const vi = lang === 'vi'
   return (
-    <Box component="nav" aria-label={vi ? 'Các bước tạo yêu cầu' : 'Request steps'} data-testid="reloc-stepper">
-      <Stack component="ol" direction="row" useFlexGap sx={{ listStyle: 'none', m: 0, p: 0, flexWrap: 'wrap', alignItems: 'center', rowGap: 0.5 }}>
+    <Box component="nav" aria-label={vi ? 'Các bước tạo yêu cầu' : 'Request steps'} data-testid="reloc-stepper" sx={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
+      <Box component="ol" sx={{ display: 'inline-flex', width: 'fit-content', maxWidth: '100%', listStyle: 'none', m: 0, p: 0 }}>
         {steps.map((s, i) => {
           const n = (i + 1) as Step
           const state = n === active ? 'active' : s.done ? 'done' : 'pending'
+          const name = `${n}. ${s.label}${s.summary ? ` · ${s.summary}` : ''}${s.done ? (vi ? ' (đã xong)' : ' (done)') : ''}`
           return (
-            <Box component="li" key={n} sx={{ display: 'flex', alignItems: 'center' }}>
-              {i > 0 && <Box aria-hidden sx={{ width: 20, height: '1px', bgcolor: 'divider', mx: 0.75 }} />}
+            // The focus ring sits on the item: the button's clip-path would cut an outline.
+            <Box
+              component="li"
+              key={n}
+              sx={(t) => ({ minWidth: 0, ml: i ? '-6px' : 0, '&:has(.Mui-focusVisible)': { outline: `2px solid ${t.palette.primary.main}`, outlineOffset: '2px', borderRadius: '4px' } })}
+            >
               <ButtonBase
                 onClick={() => onPick(n)}
                 aria-current={state === 'active' ? 'step' : undefined}
+                aria-label={name}
+                title={s.label}
                 data-state={state}
                 data-step={n}
                 sx={(t) => ({
-                  gap: 0.75,
-                  px: 1,
-                  py: 0.5,
-                  borderRadius: '999px',
-                  fontSize: 13,
-                  color: state === 'pending' ? 'text.secondary' : 'text.primary',
-                  '&:hover': { bgcolor: t.palette.action.hover },
-                  '&:focus-visible': { outline: `2px solid ${t.palette.primary.main}`, outlineOffset: '2px' },
+                  maxWidth: '100%',
+                  height: 28,
+                  gap: 0.5,
+                  p: i ? '0 14px 0 18px' : '0 14px 0 10px',
+                  clipPath: i ? CHEVRON_NEXT : CHEVRON_FIRST,
+                  fontSize: 12,
+                  fontWeight: state === 'active' ? 600 : 500,
+                  whiteSpace: 'nowrap',
+                  color: state === 'active' ? t.palette.primary.contrastText : state === 'done' ? t.palette.primary.main : t.palette.text.secondary,
+                  bgcolor: state === 'active' ? t.palette.primary.main : state === 'done' ? alpha(t.palette.primary.main, 0.12) : t.palette.action.hover,
+                  '&:hover': { filter: 'brightness(0.95)' },
                 })}
               >
-                <Box
-                  component="span"
-                  aria-hidden
-                  sx={(t) => {
-                    const c = state === 'active' ? t.palette.primary.main : state === 'done' ? t.palette.success.main : null
-                    return { width: 20, height: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0, color: c ? '#ffffff' : 'text.secondary', bgcolor: c ?? 'transparent', border: c ? 0 : `1px solid ${t.palette.divider}` }
-                  }}
-                >
-                  {s.done ? '✓' : n}
-                </Box>
-                <Box component="span" sx={{ fontWeight: state === 'active' ? 700 : 500 }}>{s.label}</Box>
-                {s.summary && <Box component="span" sx={{ color: 'text.secondary', fontSize: 12 }} data-testid={`reloc-step-summary-${n}`}>· {s.summary}</Box>}
-                {s.done && <Box component="span" sx={VISUALLY_HIDDEN}>{vi ? ' (đã xong)' : ' (done)'}</Box>}
+                {s.done ? (
+                  <CheckRounded aria-hidden sx={{ fontSize: 14, flexShrink: 0 }} />
+                ) : (
+                  <Box component="span" aria-hidden sx={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid currentColor', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 10, fontWeight: 700, lineHeight: 1 }}>
+                    {n}
+                  </Box>
+                )}
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{s.label}</Box>
+                {s.summary && (
+                  <Box
+                    component="span"
+                    data-testid={`reloc-step-summary-${n}`}
+                    sx={{ display: { xs: 'none', sm: 'inline-block' }, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 11, fontWeight: 400, opacity: 0.75 }}
+                  >
+                    · {s.summary}
+                  </Box>
+                )}
               </ButtonBase>
             </Box>
           )
         })}
-      </Stack>
+      </Box>
     </Box>
   )
 }
@@ -227,22 +284,58 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   const targetSelect = useRef<TargetLocationHandle>(null)
   const plannedDate = useRef<HTMLInputElement>(null)
   const pickedCount = draft.selected.length
-  // 0 -> >=1 machines: flash the destination card and announce the next step; the focus stays where it is.
-  const [pulse, setPulse] = useState(false)
+  // Running ring: on the card of a step that just became active (and on the destination card as the "next" hint).
+  // `animate` false (reduced motion / no @property): static ring + glow only.
+  const [ring, setRing] = useState<{ step: Step; id: number; animate: boolean } | null>(null)
+  const runRing = useCallback((s: Step) => setRing((r) => ({ step: s, id: (r?.id ?? 0) + 1, animate: canRunRing() })), [])
+  const firstStep = useRef(true)
+  useEffect(() => {
+    if (firstStep.current) return void (firstStep.current = false)
+    runRing(step)
+  }, [step, runRing])
+  // Stops at RING_MAX_MS or on the first interaction with the card; listeners are armed after the step change's own
+  // programmatic focus (same tick), so only the user's focus / click / edit counts.
+  useEffect(() => {
+    if (!ring) return
+    const card = [pickBox, destBox, formBox][ring.step - 1].current?.closest<HTMLElement>('.MuiCard-root')
+    const stop = () => setRing((r) => (r?.id === ring.id ? null : r))
+    const max = setTimeout(stop, RING_MAX_MS)
+    const arm = setTimeout(() => RING_STOP_EVENTS.forEach((e) => card?.addEventListener(e, stop)), 0)
+    return () => {
+      clearTimeout(max)
+      clearTimeout(arm)
+      RING_STOP_EVENTS.forEach((e) => card?.removeEventListener(e, stop))
+    }
+  }, [ring])
+  // Card classes set on the DOM (SectionCard takes no className); re-applied after every render, the ring restarts
+  // (class removed + reflow) only for a new run id.
+  useLayoutEffect(() => {
+    ;[pickBox, destBox, formBox].forEach((box, i) => {
+      const card = box.current?.closest<HTMLElement>('.MuiCard-root')
+      if (!card) return
+      const lit = ring?.step === i + 1
+      const run = lit && ring.animate
+      card.classList.add('reloc-step-card')
+      card.classList.toggle('reloc-step-active', step === i + 1)
+      if (run && card.dataset.ringId !== String(ring.id)) {
+        card.classList.remove('is-running')
+        void card.offsetWidth
+        card.dataset.ringId = String(ring.id)
+      }
+      card.classList.toggle('is-running', run)
+      card.classList.toggle('is-glow', lit && !ring.animate)
+    })
+  })
+  // 0 -> >=1 machines: the ring runs round the destination card and the next step is announced; the focus stays.
   const [announce, setAnnounce] = useState('')
   const prevCount = useRef(pickedCount)
   useEffect(() => {
     const prev = prevCount.current
     prevCount.current = pickedCount
     if (prev !== 0 || pickedCount === 0) return
-    setPulse(true)
+    runRing(2)
     setAnnounce(vi ? `Đã chọn ${pickedCount} máy. Tiếp theo: chọn vị trí đích.` : `${pickedCount} ${pickedCount === 1 ? 'machine' : 'machines'} selected. Next: pick the destination.`)
-  }, [pickedCount, vi])
-  useEffect(() => {
-    if (!pulse) return
-    const t = setTimeout(() => setPulse(false), PULSE_MS)
-    return () => clearTimeout(t)
-  }, [pulse])
+  }, [pickedCount, vi, runRing])
   const goToDestination = () => {
     setStep(2)
     scrollToCard(destBox.current)
@@ -492,6 +585,8 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       )}
       {drawingError && <Alert severity="error" onClose={() => setDrawingError(null)}>{drawingError}</Alert>}
 
+      <GlobalStyles styles={RING_PROPERTY} />
+      <GlobalStyles styles={ringStyles} />
       <RelocationStepper lang={lang} steps={steps} active={step} onPick={pickStep} />
       <Box role="status" aria-live="polite" data-testid="reloc-next-hint" sx={VISUALLY_HIDDEN}>{announce}</Box>
 
@@ -500,7 +595,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       <SectionCard
         title={vi ? '1. Chọn máy' : '1. Pick machines'}
         actions={<SelectionSummary lang={lang} selectedRows={draft.selectedRows} onClear={draft.clear} />}
-        sx={[rowAlign === 'stretch' && { height: '100%' }, step === 1 && activeCardSx]}
+        sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}
       >
         <Box ref={pickBox} onFocus={() => setStep(1)}>
         <MachinePicker
@@ -522,8 +617,8 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
         </Box>
       </SectionCard>
 
-      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={[rowAlign === 'stretch' && { height: '100%' }, step === 2 && activeCardSx, pulse && pulseCardSx]}>
-        <Box ref={destBox} onFocus={() => setStep(2)} data-testid="reloc-dest" data-pulse={pulse || undefined}>
+      <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
+        <Box ref={destBox} onFocus={() => setStep(2)} data-testid="reloc-dest">
         <TargetLocationSelect
           ref={targetSelect}
           lang={lang}
@@ -666,7 +761,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           <RelocationSummary lang={lang} rows={draft.selectedRows} target={draft.target} zoneCount={zoneCount} ctx={ctx} />
         </SectionCard>
 
-        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={[rowAlign === 'stretch' && { height: '100%' }, step === 3 && activeCardSx]}>
+        <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
           <Box ref={formBox} onFocus={() => setStep(3)}>
             <RelocationForm lang={lang} account={account} requesterName={user?.name ?? null} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} plannedDateRef={plannedDate} />
           </Box>
