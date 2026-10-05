@@ -286,7 +286,7 @@ describe('renderExportSvg (RelocationFloorMap export mode)', () => {
 
   it('same-layout arrow: flat (lift <= 15% of the distance) and bowed downward', () => {
     const svg = renderExportSvg(input, 'after', floor1, IMG, { w: 1140, h: 620 })
-    const m = /data-from="A2-3"><path d="M([\d.]+),([\d.]+) Q([\d.]+),([\d.]+) ([\d.]+),([\d.]+)"/.exec(svg)!
+    const m = /data-from="A2-3"><path[^>]*? d="M([\d.]+),([\d.]+) Q([\d.]+),([\d.]+) ([\d.]+),([\d.]+)"/.exec(svg)!
     const [x0, y0, cx, cy, x1, y1] = m.slice(1).map(Number)
     const px = (x: number, y: number) => ({ x: (x * floor1.imgW) / 100, y: (y * floor1.imgH) / 100 })
     const a = px(x0, y0)

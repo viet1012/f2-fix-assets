@@ -422,14 +422,14 @@ describe('RelocationTab - guided flow', () => {
     expect(focusedListbox()).not.toBeNull()
     expect(stepState(2)).toBe('active')
     fireEvent.keyDown(focusedListbox()!, { key: 'Escape' })
-    await waitFor(() => expect(active().getAttribute('aria-labelledby') ?? '').toContain(screen.getByText('Toà nhà', { selector: 'label' }).id))
+    await waitFor(() => expect(active()).toBe(screen.getByRole('combobox', { name: 'Toà nhà' })))
   })
 
   it('Enter in the empty picker input moves on to "Toà nhà"', async () => {
     mockFetch()
     render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
-    pasteCodes('A-006-1')
+    pasteCodes('A-006-1 A-006-2')
     machineInput().focus()
     fireEvent.keyDown(machineInput(), { key: 'Enter' })
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toContain('Toà B')
@@ -440,7 +440,7 @@ describe('RelocationTab - guided flow', () => {
     mockFetch()
     render(<RelocationTab lang="vi" account="E001" />)
     await screen.findByLabelText('Chọn máy')
-    pasteCodes('A-006-1')
+    pasteCodes('A-006-1 A-006-2')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Toà nhà' }))
     fireEvent.click(screen.getByRole('option', { name: 'Toà A' }))
     // Floor list open, focus inside it.

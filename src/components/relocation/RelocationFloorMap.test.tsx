@@ -500,6 +500,38 @@ describe('RelocationFloorMap - state colours', () => {
     expect(container.querySelector('linearGradient')).toBeNull()
   })
 
+  it('every arrow has a solid white casing drawn before its line, live and in the export', () => {
+    const check = (container: HTMLElement) => {
+      const groups = [...container.querySelectorAll('g[data-from]')].filter((g) => g.querySelector('.reloc-arrow'))
+      expect(groups.length).toBeGreaterThan(0)
+      for (const g of groups) {
+        const paths = [...g.querySelectorAll('path')]
+        expect(paths.map((p) => p.getAttribute('class'))).toEqual(['reloc-arrow-casing', expect.stringContaining('reloc-arrow')])
+        expect(paths[0].getAttribute('d')).toBe(paths[1].getAttribute('d'))
+        const casing = getComputedStyle(paths[0])
+        expect(paths[0].getAttribute('stroke-dasharray')).toBeNull()
+        expect(['', 'none']).toContain(casing.getPropertyValue('stroke-dasharray'))
+        expect(['', 'none']).toContain(casing.getPropertyValue('animation-name'))
+      }
+    }
+    const props = { lang: 'vi' as const, layout: layout('floor1'), role: 'after' as const, rows, target, onPickZone: () => {} }
+    const live = render(<RelocationFloorMap {...props} />)
+    check(live.container)
+    const head = getComputedStyle(live.container.querySelector('.reloc-arrow-head')!)
+    expect(head.getPropertyValue('stroke-width')).toBe('2')
+    expect(head.getPropertyValue('stroke-width')).toBe(String(FOCUS.arrow.headStroke))
+    live.unmount()
+    const exported = render(<RelocationFloorMap {...props} exportMode={{ width: 800, imageHref: 'data:,' }} />)
+    check(exported.container)
+    expect(exported.container.querySelector('g[data-from] polygon')?.getAttribute('stroke')).toBe('#ffffff')
+  })
+
+  it('cross arrows use the same white casing', () => {
+    const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor2')} role="after" rows={rows} target={{ layoutId: 'floor2', zone: 'A15-3' }} onPickZone={() => {}} ctx={ctx} />)
+    const line = container.querySelector('.reloc-arrow.is-cross')!
+    expect(line.previousElementSibling?.getAttribute('class')).toBe('reloc-arrow-casing')
+  })
+
   it('arrows from another layout are purple', () => {
     const { container } = render(<RelocationFloorMap lang="vi" layout={layout('floor2')} role="after" rows={rows} target={{ layoutId: 'floor2', zone: 'A15-3' }} onPickZone={() => {}} ctx={ctx} />)
     expect(is(tokens.light.relocCross)(getComputedStyle(container.querySelector('.reloc-arrow.is-cross')!).getPropertyValue('stroke'))).toBe(true)

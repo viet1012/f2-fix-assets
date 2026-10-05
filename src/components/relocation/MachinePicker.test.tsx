@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useMemo, useState } from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MachinePicker } from './MachinePicker'
 
 type R = { code: string; name: string; kind: string; currentZone: string; floor: string | null; mapFloor: string | null; floorMismatch: boolean; fac: string }
@@ -15,7 +15,7 @@ const ROWS: R[] = [
   row('B-001', 'Máy tiện nhỏ', 'Fac_B', 'B1-1'),
 ]
 
-function Harness() {
+function Harness({ onNext }: { onNext?: () => void }) {
   const [selected, setSelected] = useState<string[]>([])
   const byCode = useMemo(() => new Map(ROWS.map((r) => [r.code, r])), [])
   return (
@@ -30,6 +30,7 @@ function Harness() {
       onAdd={(codes) => setSelected((s) => [...s, ...codes])}
       onRemove={(code) => setSelected((s) => s.filter((c) => c !== code))}
       onClear={() => setSelected([])}
+      onNext={onNext}
     />
   )
 }
@@ -44,6 +45,24 @@ const toggle = (group: string) => fireEvent.click(document.querySelector(`[data-
 const optionCodes = () => screen.queryAllByRole('option').map((o) => o.querySelector('strong')?.textContent)
 
 describe('MachinePicker', () => {
+  it('"next" signals: never on a pick (focus stays), on Esc and on Enter in the empty input', () => {
+    const onNext = vi.fn()
+    render(<Harness onNext={onNext} />)
+    input().focus()
+    open()
+    type('A-001')
+    fireEvent.click(screen.getByRole('option', { name: /A-001/ }))
+    expect(onNext).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(input())
+    fireEvent.keyDown(input(), { key: 'Escape' })
+    expect(onNext).toHaveBeenCalledTimes(1)
+    type('')
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    expect(onNext).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Tiếp: Chọn vị trí đích →' }))
+    expect(onNext).toHaveBeenCalledTimes(3)
+  })
+
   it('building chips show eligible counts and filter the options', () => {
     render(<Harness />)
     expect(screen.getByRole('button', { name: 'Tất cả (4)' })).toBeTruthy()

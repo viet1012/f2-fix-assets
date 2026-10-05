@@ -105,7 +105,8 @@ export const FOCUS = {
   /** Old zone: pale amber fill, dashed amber stroke; chip "A-341 (cũ)" pale amber with dark ink; hollow pin. */
   old: { color: AMBER.base, fill: 0.25, stroke: AMBER.base, strokeWidth: 2, dash: '6 4', chipBg: AMBER.paper, chipInk: AMBER.ink, pinBorder: 2.5 },
   to: { color: MAP.relocTo, fill: 0.75, stroke: '#065f46', strokeWidth: 2.5 },
-  arrow: { strokeWidth: 2.5, dash: '8 6' },
+  /** White casing under the dashed line (solid, still) and a white outline on the head, so arrows read over the drawing. */
+  arrow: { strokeWidth: 2.5, dash: '8 6', casingWidth: 6, casingColor: '#ffffff', casingOpacity: 0.95, headStroke: 2 },
   /** Tries per pin caption to get out of an overlap ("(cũ)" chips: up/down, left, right). */
   labelTries: 4,
   transitionMs: 200,
@@ -709,7 +710,16 @@ function RelocationFloorMapImpl({
               strokeDasharray: FOCUS.arrow.dash,
               animation: 'reloc-flow 1s linear infinite',
             },
-            '& .reloc-arrow-head': { fill: TO },
+            '& .reloc-arrow-casing': {
+              fill: 'none',
+              stroke: FOCUS.arrow.casingColor,
+              strokeOpacity: FOCUS.arrow.casingOpacity,
+              strokeWidth: FOCUS.arrow.casingWidth,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              vectorEffect: 'non-scaling-stroke',
+            },
+            '& .reloc-arrow-head': { fill: TO, stroke: FOCUS.arrow.casingColor, strokeWidth: FOCUS.arrow.headStroke, strokeLinejoin: 'round', paintOrder: 'stroke' },
             '& .reloc-arrow.is-cross': { stroke: CROSS },
             '& .reloc-arrow-head.is-cross': { fill: CROSS },
             '@keyframes reloc-flow': { to: { strokeDashoffset: -14 } },
@@ -811,6 +821,7 @@ function RelocationFloorMapImpl({
               })}
               {arrows.map((a) => (
                 <g key={`arrow-${a.key}`} className="reloc-arrow-group" data-from={a.key}>
+                  <path className="reloc-arrow-casing" d={a.d} />
                   <path className={`reloc-arrow${a.cross ? ' is-cross' : ''}`} d={a.d} />
                   <polygon className={`reloc-arrow-head${a.cross ? ' is-cross' : ''}`} points={a.head} />
                 </g>
@@ -1011,8 +1022,9 @@ function ExportSvg({ exportMode, layout, vis, W, H, focus, layers, states, relat
           })}
           {arrows.map((a) => (
             <g key={`arrow-${a.key}`} data-from={a.key}>
-              <path d={a.d} fill="none" stroke={a.cross ? CROSS : TO} strokeWidth={FOCUS.arrow.strokeWidth} strokeLinecap="round" strokeDasharray={FOCUS.arrow.dash} {...nonScaling} />
-              <polygon points={a.head} fill={a.cross ? CROSS : TO} />
+              <path className="reloc-arrow-casing" d={a.d} fill="none" stroke={FOCUS.arrow.casingColor} strokeOpacity={FOCUS.arrow.casingOpacity} strokeWidth={FOCUS.arrow.casingWidth} strokeLinecap="round" strokeLinejoin="round" {...nonScaling} />
+              <path className="reloc-arrow" d={a.d} fill="none" stroke={a.cross ? CROSS : TO} strokeWidth={FOCUS.arrow.strokeWidth} strokeLinecap="round" strokeDasharray={FOCUS.arrow.dash} {...nonScaling} />
+              <polygon points={a.head} fill={a.cross ? CROSS : TO} stroke={FOCUS.arrow.casingColor} strokeWidth={FOCUS.arrow.headStroke} strokeLinejoin="round" paintOrder="stroke" />
             </g>
           ))}
         </g>
