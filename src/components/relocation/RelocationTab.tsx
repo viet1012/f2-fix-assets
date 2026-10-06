@@ -1,5 +1,5 @@
 import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, GlobalStyles, Link, Stack, Switch, Typography, type Theme } from '@mui/material'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { facLabel } from '../../config/relocation'
 import { FLOORS, ZONE_INDEX, type LayoutId } from '../../data/mapData'
 import { useAssetsWithLocation, useLocations } from '../../hooks/useLocations'
@@ -32,6 +32,9 @@ import { TargetLocationSelect, type Route, type RouteBadge, type TargetLocationH
 import { RelocationMapToolbar } from './RelocationMapToolbar'
 import { ZoneBrowseSelect } from './ZoneBrowseSelect'
 import { ZoneMachineList } from './ZoneMachineList'
+
+/** three.js and the 3D scene: a separate chunk, loaded on the first "Xem 3D". */
+const Relocation3DView = lazy(() => import('./Relocation3DView'))
 
 const MAP = tokens.light // Solid state colours with white text: the same in both theme modes.
 
@@ -242,6 +245,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   /** Zone whose machine list is open. */
   const [openZone, setOpenZone] = useState<string | null>(null)
   const [mapSettings, updateMapSettings] = useMapViewSettings()
+  const [open3d, setOpen3d] = useState(false)
   /** Zone of the selected-machine row being hovered: flashed on both maps. */
   const [hoverZone, setHoverZone] = useState<string | null>(null)
   // "Sync zoom": the zoom step is shared state; the scroll position never is. Live scroll goes map-to-map through the
@@ -258,12 +262,11 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
     () => ({
       showAll: mapSettings.showAll,
       showCounts: mapSettings.showCounts,
-      use3d: mapSettings.image3d,
       highlightZone: hoverZone,
       ...(scrollSync ? { view: { zoomIndex: sharedZoom, ...sharedScroll.current }, onViewChange: onSharedViewChange, scrollSync } : {}),
       ctx,
     }),
-    [mapSettings.showAll, mapSettings.showCounts, mapSettings.image3d, hoverZone, scrollSync, sharedZoom, onSharedViewChange, ctx],
+    [mapSettings.showAll, mapSettings.showCounts, hoverZone, scrollSync, sharedZoom, onSharedViewChange, ctx],
   )
   const [form, setForm] = useState<RelocationFormValues>(EMPTY_FORM)
   /** "Only my requests" filter of the submitted table. */
@@ -682,7 +685,28 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       </SectionCard>
       </Box>
 
-      <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} />
+      <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} onOpen3d={() => setOpen3d(true)} />
+      {open3d && (
+        <Suspense fallback={null}>
+          <Relocation3DView
+            lang={lang}
+            open
+            onClose={() => setOpen3d(false)}
+            layouts={FLOORS}
+            initialLayoutId={afterLayoutId ?? beforeLayoutId ?? FLOORS[0].id}
+            zoneCount={zoneCount}
+            rows={draft.selectedRows}
+            target={draft.target}
+            ctx={ctx}
+            route={route}
+            routeColors={routeColors}
+            placeOf={placeOf}
+            layoutPlace={(id) => placeOf(id, layoutFac(id))}
+            isPickable={(id, code) => isCatalogTarget(catalog, id, code)}
+            onPickZone={onPickZone}
+          />
+        </Suspense>
+      )}
 
       {/* Two equal map columns (same frame ratio and fit); the zone machine list is a third column when open. */}
       <Box sx={{ display: 'grid', gap: density.gap, alignItems: beforeLayout && afterLayout ? 'stretch' : 'start', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: openZone ? 'repeat(2, minmax(0, 1fr)) 300px' : 'repeat(2, minmax(0, 1fr))' } }}>

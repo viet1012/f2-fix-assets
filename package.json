@@ -18,13 +18,15 @@
     "chart.js": "latest",
     "react": "latest",
     "react-chartjs-2": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/three": "^0.186.0",
     "jsdom": "^29.1.1",
     "typescript": "latest",
     "vite": "latest",

@@ -20,20 +20,69 @@ symbols) is drawn flat at its original thickness, on top, so it stays as readabl
 
 The extrusion falls down-right ON SCREEN: drawings shown rotated (ROTATION) use the matching image offset.
 
+--export-geometry: instead of the images, write src/data/geometry3d/<layoutId>.json for a real 3D view, from the same
+masks (images untouched). Coordinates are % of the ORIGINAL image (same system as mapData; the Mold drawing is not
+rotated, the FE rotates it), rounded to 2 decimals:
+  walls           = (a) structure vectorised into axis-aligned rectangles: per direction, runs >= --wall-min px on
+                    consecutive rows/columns with the same extent are merged; thickness padded to >= 2px;
+                    (b) outer walls drawn as BANDS: stippled strips (density of tiny dots) and the gap between two
+                    parallel wall lines, split into straight pieces; a piece is kept when its minAreaRect is >= BAND_RATIO
+                    times longer than wide, >= BAND_MIN_LEN px long and BAND_MIN..BAND_MAX px wide (near-square hatching: parking, stairs, is
+                    dropped). A slanted band carries `angle` (degrees, image px, clockwise): {x, y, w, h} is then the
+                    unrotated box around the same centre, to be turned by `angle` about its centre AFTER conversion to px.
+  buildingOutline = bounding box of the major-area polygons (src/data/mapAreas.ts, read by regex) grown by
+                    OUTLINE_PAD % of its size per side, clamped to 0..100; `outlineOverride` (null, or [{x, y}])
+                    replaces it when set. Walls are then filtered: centre outside the outline -> dropped; band walls
+                    are kept only within EDGE_TOL of the outline's size from its edge; structure walls inside stay.
+  machines, columns = always [] (kept for compatibility: machines are not built from the image).
+--preview DIR also draws each JSON over its original image (DIR/<layoutId>-geometry.png) to check it by eye.
+
 Usage: python scripts/make3dMaps.py [--depth 2] [--shadow 0.10] [--wall-len 25] [--min-thick 2] [--max-density 0.35] [--floor epoxy] [--floor-min 6000]
        [--machine-min 60] [--machine-max 2000] [--door-gap 9] [--only floor1-press]
+       [--export-geometry [--wall-min 8] [--preview DIR]]
 """
 from __future__ import annotations
 
 import argparse
 import io
+import json
+import re
 from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 MAPS = Path(__file__).resolve().parent.parent / 'src' / 'assets' / 'maps'
+GEOMETRY = Path(__file__).resolve().parent.parent / 'src' / 'data' / 'geometry3d'
+# Image of each layout (FLOORS[].imageData in src/data/mapData.ts).
+AREAS_TS = Path(__file__).resolve().parent.parent / 'src' / 'data' / 'mapAreas.ts'
+OUTLINE_PAD = 0.02  # buildingOutline = area bbox grown by this fraction of its size per side
+EDGE_TOL = 0.03  # band walls kept only this close (fraction of the outline's size) to the outline edge
+OUTLINE_OVERRIDE: dict[str, list[dict[str, float]] | None] = {}  # layoutId -> [{x, y}] replacing the bbox
+LAYOUT_IDS = {'floor1-press': 'floor1', 'floor1-guide': 'floor2', 'floor1-warehouse': 'floor3', 'floor1-mold': 'floor4', 'floor2-all': 'floor5'}
+GEOMETRY_MAX_BYTES = 150 * 1024
+WALL_MIN_THICK = 2
+# Runs on consecutive rows belong to the same wall when both ends move by at most this many px.
+WALL_MERGE_TOL = 2
+# Outer-wall bands. Stipple = stroke blobs of at most DOT_MAX px; a pixel is stippled when >= DOT_COUNT of them lie in
+# its DOT_WINDOW px window. Two parallel wall lines at most PAIR_GAP px apart (each >= PAIR_LEN px long) fill the gap.
+DOT_MAX = 6
+DOT_WINDOW = 15
+DOT_COUNT = 6
+PAIR_GAP = 12
+PAIR_LEN = 60
+# Straight pieces of a bent band (L / U rings) are cut with lines of SPLIT_LEN px; only components covering less than
+# SPLIT_MAX_FILL of their minAreaRect are rings (a fuller one is a hatched area: parking, stairs, and is dropped).
+SPLIT_LEN = 40
+SPLIT_MAX_FILL = 0.5
+BAND_RATIO = 5
+BAND_MIN = 4
+BAND_MAX = 40
+# Shorter bands are aisle / room details, not outer walls.
+BAND_MIN_LEN = 100
+# A band within ANGLE_SNAP degrees of horizontal / vertical is stored axis-aligned.
+ANGLE_SNAP = 2
 THRESHOLD = 160  # gray < THRESHOLD = stroke
 FLOOR = (0xF8, 0xFA, 0xFC)
 SIDE_NEAR = (0xCB, 0xD5, 0xE1)
@@ -97,6 +146,12 @@ def density_of(mask: np.ndarray, size: int) -> np.ndarray:
 
 
 def structure_of(mask: np.ndarray, wall_len: int, min_thick: int, max_density: float) -> np.ndarray:
+    horiz, vert = structure_parts(mask, wall_len, min_thick, max_density)
+    return horiz | vert
+
+
+def structure_parts(mask: np.ndarray, wall_len: int, min_thick: int, max_density: float) -> tuple[np.ndarray, np.ndarray]:
+    """Horizontal and vertical walls of structure_of, separately."""
     horiz = open_line(mask, wall_len, axis=1)
     vert = open_line(mask, wall_len, axis=0)
     if min_thick > 1:
@@ -106,7 +161,8 @@ def structure_of(mask: np.ndarray, wall_len: int, min_thick: int, max_density: f
         if (thick_h | thick_v).any():
             horiz, vert = thick_h, thick_v
     # Hatching / stripes / dense racks: raising them fills the gaps with side faces, so they stay flat (detail).
-    return (horiz | vert) & (density_of(mask, DENSITY_WINDOW) < max_density)
+    sparse = density_of(mask, DENSITY_WINDOW) < max_density
+    return horiz & sparse, vert & sparse
 
 
 def saturation(c: tuple[int, int, int]) -> float:
@@ -206,6 +262,197 @@ def make_3d(src: Path, depth: int, shadow: float, wall_len: int, min_thick: int,
     return out
 
 
+def runs_of(row: np.ndarray) -> list[tuple[int, int]]:
+    """[start, end) of each run of True in a 1-D mask."""
+    d = np.diff(np.concatenate(([0], row.astype(np.int8), [0])))
+    return list(zip(np.flatnonzero(d == 1).tolist(), np.flatnonzero(d == -1).tolist()))
+
+
+def wall_rects(walls: np.ndarray, min_len: int) -> list[tuple[int, int, int, int]]:
+    """Horizontal walls -> rectangles (x, y, w, h) px: runs >= min_len merged over consecutive rows with the same extent."""
+    done: list[list[int]] = []
+    open_: list[list[int]] = []  # [x0, x1, y0, y1)
+    for y in range(walls.shape[0]):
+        nxt = []
+        for x0, x1 in runs_of(walls[y]):
+            if x1 - x0 < min_len:
+                continue
+            hit = next((r for r in open_ if abs(r[0] - x0) <= WALL_MERGE_TOL and abs(r[1] - x1) <= WALL_MERGE_TOL), None)
+            if hit:
+                open_.remove(hit)
+                hit[0], hit[1], hit[3] = min(hit[0], x0), max(hit[1], x1), y + 1
+                nxt.append(hit)
+            else:
+                nxt.append([x0, x1, y, y + 1])
+        done.extend(open_)
+        open_ = nxt
+    done.extend(open_)
+    out = []
+    for x0, x1, y0, y1 in done:
+        h = y1 - y0
+        if h < WALL_MIN_THICK:  # Pad thin walls around their centre.
+            y0 -= (WALL_MIN_THICK - h) // 2
+            h = WALL_MIN_THICK
+        out.append((x0, y0, x1 - x0, h))
+    return out
+
+
+def band_mask(mask: np.ndarray) -> np.ndarray:
+    """Outer-wall bands: stippled strips plus the gap between two parallel long wall lines."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    tiny = stats[:, 4] <= DOT_MAX
+    tiny[0] = False
+    dots = tiny[labels]
+    stipple = _window_sum(_window_sum(dots, DOT_WINDOW, 1), DOT_WINDOW, 0) >= DOT_COUNT
+    band = stipple
+    for axis in (1, 0):
+        lines = open_line(mask, PAIR_LEN, axis)
+        # Close across the lines: two parallel lines <= PAIR_GAP apart merge into one solid strip...
+        kernel = np.ones((PAIR_GAP + 1, 1) if axis == 1 else (1, PAIR_GAP + 1), np.uint8)
+        filled = cv2.morphologyEx(lines.astype(np.uint8), cv2.MORPH_CLOSE, kernel) > 0
+        # ...and a single line (<= 2px) stays thin, so it does not survive an opening with BAND_MIN across it.
+        band = band | open_line(filled, BAND_MIN, 1 - axis)
+    return cv2.morphologyEx(band.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+
+def band_of(points: np.ndarray) -> tuple[float, float, float, float, float] | None:
+    """(cx, cy, length, width, angle of the long side in degrees) when the points form a straight band, else None."""
+    (cx, cy), (a, b), ang = cv2.minAreaRect(points)
+    length, width = max(a, b), min(a, b)
+    if not (BAND_MIN <= width <= BAND_MAX and length >= max(BAND_RATIO * width, BAND_MIN_LEN)):
+        return None
+    angle = ang if a >= b else ang + 90
+    angle = (angle + 90) % 180 - 90  # -90..90
+    return cx, cy, length, width, angle
+
+
+def band_walls(band: np.ndarray) -> list[tuple[float, float, float, float, float]]:
+    """Bands -> (cx, cy, length, width, angle) px: whole components when straight, else their straight pieces."""
+    out = []
+    n, labels, _, _ = cv2.connectedComponentsWithStats(band, connectivity=8)
+    pieces = [open_line(band > 0, SPLIT_LEN, 1), open_line(band > 0, SPLIT_LEN, 0)]
+    for i in range(1, n):
+        comp = labels == i
+        pts = cv2.findNonZero(comp.astype(np.uint8))
+        whole = band_of(pts)
+        if whole:
+            out.append(whole)
+            continue
+        (_, _), (a, b), _ = cv2.minAreaRect(pts)
+        if len(pts) > SPLIT_MAX_FILL * a * b:
+            continue
+        for part in pieces:
+            sub = (part & comp).astype(np.uint8)
+            m, sub_labels, _, _ = cv2.connectedComponentsWithStats(sub, connectivity=8)
+            for j in range(1, m):
+                b = band_of(cv2.findNonZero((sub_labels == j).astype(np.uint8)))
+                if b:
+                    out.append(b)
+    return out
+
+
+def rect_corners(cx: float, cy: float, length: float, width: float, angle: float) -> np.ndarray:
+    return cv2.boxPoints(((cx, cy), (length, width), angle))
+
+
+def area_points(stem: str) -> list[tuple[float, float]]:
+    """Every point of the major areas of one drawing, in % of its original image, regexed out of mapAreas.ts."""
+    ts = AREAS_TS.read_text(encoding='utf-8')
+    name = stem.upper().replace('-', '_') + '_AREAS'
+    m = re.search(rf'export const {name}\b.*?\n\]', ts, re.S)
+    if not m:
+        raise SystemExit(f'{name} not found in {AREAS_TS}')
+    block, num = m.group(0), r'(-?\d+(?:\.\d+)?)'
+    pts = []
+    for l, t, r, b in re.findall(rf"rectArea\(\s*'[^']*'\s*,\s*{num}\s*,\s*{num}\s*,\s*{num}\s*,\s*{num}\s*\)", block):
+        pts += [(float(l), float(t)), (float(r), float(b))]
+    for x, y, bw, bh, iw, ih in re.findall(rf"pxRectToArea\(\s*'[^']*'\s*,\s*\[{num}\s*,\s*{num}\s*,\s*{num}\s*,\s*{num}\s*\]\s*,\s*{num}\s*,\s*{num}\s*\)", block):
+        x, y, bw, bh, iw, ih = map(float, (x, y, bw, bh, iw, ih))
+        pts += [(x / iw * 100, y / ih * 100), ((x + bw) / iw * 100, (y + bh) / ih * 100)]
+    pts += [(float(x), float(y)) for x, y in re.findall(rf'\{{\s*x:\s*{num}\s*,\s*y:\s*{num}\s*\}}', block)]
+    return pts
+
+
+def export_geometry(src: Path, args: argparse.Namespace) -> dict:
+    """Geometry of one drawing in % of the original image (see the module doc)."""
+    original = Image.open(src)
+    flat = Image.new('RGBA', original.size, (255, 255, 255, 255))
+    flat.alpha_composite(original.convert('RGBA'))
+    gray = np.asarray(flat.convert('L')).astype(np.float32)
+    mask = gray < THRESHOLD
+    h, w = mask.shape
+    horiz, vert = structure_parts(mask, args.wall_len, args.min_thick, args.max_density)
+    layout = LAYOUT_IDS[src.stem]
+
+    r2 = lambda v: round(float(v), 2)
+    pct = lambda x, y, bw, bh: {'x': r2(x / w * 100), 'y': r2(y / h * 100), 'w': r2(bw / w * 100), 'h': r2(bh / h * 100)}
+    walls = []  # (wall, is band)
+    for x, y, bw, bh in wall_rects(horiz, args.wall_min) + [(x, y, ww, hh) for y, x, hh, ww in wall_rects(vert.T, args.wall_min)]:
+        walls.append((pct(x, y, bw, bh), False))
+    for cx, cy, length, width, angle in band_walls(band_mask(mask)):
+        if abs(angle) <= ANGLE_SNAP or abs(abs(angle) - 90) <= ANGLE_SNAP:
+            bw, bh = (length, width) if abs(angle) <= ANGLE_SNAP else (width, length)
+            walls.append((pct(cx - bw / 2, cy - bh / 2, bw, bh), True))
+        else:
+            walls.append(({**pct(cx - length / 2, cy - width / 2, length, width), 'angle': r2(angle)}, True))
+
+    override = OUTLINE_OVERRIDE.get(layout)
+    if override:
+        outline = [{'x': r2(p['x']), 'y': r2(p['y'])} for p in override]
+    else:
+        xs, ys = zip(*area_points(src.stem))
+        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        px, py = (x1 - x0) * OUTLINE_PAD, (y1 - y0) * OUTLINE_PAD
+        x0, x1, y0, y1 = max(0, x0 - px), min(100, x1 + px), max(0, y0 - py), min(100, y1 + py)
+        outline = [{'x': r2(x0), 'y': r2(y0)}, {'x': r2(x1), 'y': r2(y0)}, {'x': r2(x1), 'y': r2(y1)}, {'x': r2(x0), 'y': r2(y1)}]
+    poly = np.array([[p['x'], p['y']] for p in outline], np.float32)
+    ox0, oy0 = poly.min(axis=0)
+    ox1, oy1 = poly.max(axis=0)
+    tol_x, tol_y = (ox1 - ox0) * EDGE_TOL, (oy1 - oy0) * EDGE_TOL
+
+    kept = []
+    for r, is_band in walls:
+        cx, cy = r['x'] + r['w'] / 2, r['y'] + r['h'] / 2
+        if cv2.pointPolygonTest(poly, (float(cx), float(cy)), False) < 0:
+            continue
+        thick = min(r['w'] * w, r['h'] * h) / 100 if 'angle' not in r else min(r['w'] * w / 100, r['h'] * h / 100)
+        if is_band and thick >= BAND_MIN and min(cx - ox0, ox1 - cx) > tol_x and min(cy - oy0, oy1 - cy) > tol_y:
+            continue
+        kept.append(r)
+    print(f'{layout}: walls {len(walls)} -> {len(kept)}')
+    return {
+        'layoutId': layout,
+        'image': src.name,
+        'imgW': w,
+        'imgH': h,
+        'walls': kept,
+        'buildingOutline': outline,
+        'outlineOverride': override or None,
+        'columns': [],
+        'machines': [],
+    }
+
+
+def draw_geometry(src: Path, geo: dict, dst: Path) -> None:
+    """Preview: the geometry over the faded original (outline blue, axis walls red, band walls orange)."""
+    base = Image.open(src).convert('RGBA')
+    bg = Image.new('RGBA', base.size, (255, 255, 255, 255))
+    bg.alpha_composite(base)
+    canvas = Image.blend(bg, Image.new('RGBA', base.size, (255, 255, 255, 255)), 0.45)
+    over = Image.new('RGBA', base.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(over)
+    W, H = geo['imgW'], geo['imgH']
+    if geo['buildingOutline']:
+        d.polygon([(p['x'] * W / 100, p['y'] * H / 100) for p in geo['buildingOutline']], fill=(37, 99, 235, 30), outline=(37, 99, 235, 255))
+    for r in geo['walls']:
+        x, y, bw, bh = r['x'] * W / 100, r['y'] * H / 100, r['w'] * W / 100, r['h'] * H / 100
+        pts = rect_corners(x + bw / 2, y + bh / 2, bw, bh, r.get('angle', 0)).tolist()
+        band = 'angle' in r or min(bw, bh) >= BAND_MIN
+        d.polygon([tuple(p) for p in pts], fill=(234, 88, 12, 170) if band else (220, 38, 38, 210))
+    canvas.alpha_composite(over)
+    canvas.convert('RGB').save(dst)
+
+
 def encode(img: Image.Image, colors: int | None) -> bytes:
     buf = io.BytesIO()
     (img.quantize(colors=colors, method=Image.Quantize.MEDIANCUT) if colors else img).save(buf, 'PNG', optimize=True)
@@ -225,6 +472,9 @@ def main() -> None:
     ap.add_argument('--machine-max', type=int, default=2000, help='largest enclosed area (px) painted as a machine (default 2000)')
     ap.add_argument('--door-gap', type=int, default=9, help='openings up to this many px (doors) do not let outdoor into a building (default 9)')
     ap.add_argument('--only', help='process one image, by name without extension (e.g. floor1-press)')
+    ap.add_argument('--export-geometry', action='store_true', help=f'write {GEOMETRY.name}/<layoutId>.json instead of the -3d images')
+    ap.add_argument('--wall-min', type=int, default=8, help='geometry: shortest wall segment kept, px (default 8)')
+    ap.add_argument('--preview', type=Path, help='geometry: also draw each JSON over its original into this folder')
     args = ap.parse_args()
     depth = max(1, min(MAX_DEPTH, args.depth))
     for c in (OUTDOOR, MACHINE, *FLOOR_PALETTES.values(), FLOOR):
@@ -235,6 +485,23 @@ def main() -> None:
         sources = [p for p in sources if p.stem == args.only]
         if not sources:
             raise SystemExit(f'no image named {args.only!r} in {MAPS}')
+
+    if args.export_geometry:
+        GEOMETRY.mkdir(parents=True, exist_ok=True)
+        for src in sources:
+            if src.stem not in LAYOUT_IDS:
+                continue
+            geo = export_geometry(src, args)
+            data = json.dumps(geo, separators=(',', ':')).encode('utf-8')
+            dst = GEOMETRY / f"{geo['layoutId']}.json"
+            dst.write_bytes(data)
+            flag = '' if len(data) <= GEOMETRY_MAX_BYTES else '  (over 150 KB)'
+            bands = sum(min(r['w'] * geo['imgW'], r['h'] * geo['imgH']) / 100 >= BAND_MIN or 'angle' in r for r in geo['walls'])
+            print(f"{dst.name} ({src.stem}): {len(geo['walls'])} walls ({bands} >= {BAND_MIN}px thick), outline {len(geo['buildingOutline'])} pts, {len(data) / 1024:.1f} KB{flag}")
+            if args.preview:
+                args.preview.mkdir(parents=True, exist_ok=True)
+                draw_geometry(src, geo, args.preview / f"{geo['layoutId']}-geometry.png")
+        return
 
     for src in sources:
         img = make_3d(src, depth, args.shadow, args.wall_len, args.min_thick, args.max_density,

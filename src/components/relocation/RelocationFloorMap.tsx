@@ -59,8 +59,6 @@ interface Props {
   showAll?: boolean
   /** Machine count in the zone labels ("A6-1 · 26"). */
   showCounts?: boolean
-  /** Show the "3D look" drawing (layout.imageData3d) instead of the original; ignored by exportMode. */
-  use3d?: boolean
   /** Controlled zoom/scroll, e.g. shared with the other map. */
   view?: MapView
   onViewChange?: (view: MapView) => void
@@ -515,7 +513,6 @@ function RelocationFloorMapImpl({
   extraTray = [],
   showAll = true,
   showCounts = true,
-  use3d = false,
   view,
   onViewChange,
   scrollSync,
@@ -748,7 +745,6 @@ function RelocationFloorMapImpl({
     return { hidden: pl.hidden, transform: `${upright} translate(${(pl.x - a.x).toFixed(1)}px, ${(pl.y - a.y).toFixed(1)}px)`.trim() }
   }
 
-  const drawing3d = use3d && !!layout.imageData3d
   if (exportMode) {
     return (
       <ExportSvg
@@ -783,7 +779,7 @@ function RelocationFloorMapImpl({
         <MapScene
           lang={lang}
           title={layout.title}
-          imageData={drawing3d ? layout.imageData3d! : layout.imageData}
+          imageData={layout.imageData}
           imgW={layout.imgW}
           imgH={layout.imgH}
           rotationDeg={layout.rotationDeg}
@@ -797,7 +793,7 @@ function RelocationFloorMapImpl({
             // The drawing recedes (grey, lighter; more in focus mode) so the coloured zones carry the information.
             // The 3D drawing is already slate-toned: no grayscale, same opacity.
             // willChange: the filtered drawing gets its own layer, so scrolling does not re-run the filter.
-            '& > img': { willChange: 'transform', filter: drawing3d ? 'none' : 'grayscale(1)', opacity: drawing3d ? FOCUS.image3d : focus ? FOCUS.image.focus : FOCUS.image.idle, transition: `opacity ${FOCUS.transitionMs}ms` },
+            '& > img': { willChange: 'transform', filter: 'grayscale(1)', opacity: focus ? FOCUS.image.focus : FOCUS.image.idle, transition: `opacity ${FOCUS.transitionMs}ms` },
             '& .reloc-svg': { pointerEvents: 'none' },
             '& .reloc-zone': {
               strokeLinejoin: 'round',
@@ -930,7 +926,7 @@ function RelocationFloorMapImpl({
                   className,
                   'data-zone': s.code,
                   'data-state': state,
-                  fill: alpha(s.color, s.major && hasSubs(s.code) ? FOCUS.majorFill : drawing3d ? FOCUS.zoneFill3d : FOCUS.zoneFill),
+                  fill: alpha(s.color, s.major && hasSubs(s.code) ? FOCUS.majorFill : FOCUS.zoneFill),
                   stroke: s.color,
                   vectorEffect: 'non-scaling-stroke',
                   ...(pickable ? pickProps(s.code, state) : {}),

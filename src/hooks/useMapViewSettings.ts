@@ -6,18 +6,22 @@ export interface MapViewSettings {
   showCounts: boolean
   /** Before and After maps share zoom and scroll. */
   syncZoom: boolean
-  /** "3D look" drawings instead of the originals (off by default). */
-  image3d: boolean
 }
 
-export const DEFAULT_MAP_SETTINGS: MapViewSettings = { showAll: true, showCounts: true, syncZoom: true, image3d: false }
+export const DEFAULT_MAP_SETTINGS: MapViewSettings = { showAll: true, showCounts: true, syncZoom: true }
 const STORAGE_KEY = 'f2.relocation.mapView'
+/** Keys no longer used, dropped from the stored settings on read. */
+const OBSOLETE_KEYS = ['image3d']
 
 function read(): MapViewSettings {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     const parsed: unknown = raw ? JSON.parse(raw) : null
     if (!parsed || typeof parsed !== 'object') return DEFAULT_MAP_SETTINGS
+    if (OBSOLETE_KEYS.some((k) => k in parsed)) {
+      const rest = Object.fromEntries(Object.entries(parsed).filter(([k]) => !OBSOLETE_KEYS.includes(k)))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(rest))
+    }
     const out = { ...DEFAULT_MAP_SETTINGS }
     for (const key of Object.keys(out) as (keyof MapViewSettings)[]) {
       const v = (parsed as Record<string, unknown>)[key]

@@ -1,4 +1,4 @@
-import { alpha, Box, FormControlLabel, Stack, Switch, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material'
+import { alpha, Box, Button, FormControlLabel, Stack, Switch, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material'
 import ViewInArOutlined from '@mui/icons-material/ViewInArOutlined'
 import type { MapViewSettings } from '../../hooks/useMapViewSettings'
 import type { Lang } from '../../types/fixedAsset'
@@ -22,10 +22,12 @@ interface Props {
   lang: Lang
   settings: MapViewSettings
   onChange: (patch: Partial<MapViewSettings>) => void
+  /** "Xem 3D": opens the 3D dialog. */
+  onOpen3d?: () => void
 }
 
 /** Controls shared by the Before and After maps. */
-export function RelocationMapToolbar({ lang, settings, onChange }: Props) {
+export function RelocationMapToolbar({ lang, settings, onChange, onOpen3d }: Props) {
   const vi = lang === 'vi'
   return (
     <Stack
@@ -54,15 +56,11 @@ export function RelocationMapToolbar({ lang, settings, onChange }: Props) {
         control={<Switch size="small" checked={settings.syncZoom} onChange={(e) => onChange({ syncZoom: e.target.checked })} />}
         label={<Typography variant="body2">{vi ? 'Đồng bộ zoom' : 'Sync zoom'}</Typography>}
       />
-      <FormControlLabel
-        control={<Switch size="small" checked={settings.image3d} onChange={(e) => onChange({ image3d: e.target.checked })} />}
-        label={
-          <Stack direction="row" spacing={0.5} component="span" sx={{ alignItems: 'center' }}>
-            <ViewInArOutlined fontSize="small" aria-hidden sx={{ color: 'text.secondary' }} />
-            <Typography variant="body2" component="span">{vi ? 'Ảnh 3D' : '3D drawing'}</Typography>
-          </Stack>
-        }
-      />
+      {onOpen3d && (
+        <Button size="small" variant="outlined" startIcon={<ViewInArOutlined />} onClick={onOpen3d} data-testid="reloc-open-3d" sx={{ alignSelf: { xs: 'flex-start', md: 'center' }, whiteSpace: 'nowrap' }}>
+          {vi ? 'Xem 3D' : '3D view'}
+        </Button>
+      )}
       <Box sx={{ flex: 1, display: { xs: 'none', md: 'block' } }} />
       <Stack direction="row" spacing={1.5} useFlexGap sx={{ flexWrap: 'wrap' }} aria-label={vi ? 'Chú giải' : 'Legend'} data-testid="reloc-legend">
         <Swatch color={FOCUS.from.color} fill={1} label={vi ? 'Vị trí hiện tại' : 'Current location'} />
