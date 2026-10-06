@@ -29,7 +29,7 @@ export type RelocationStatus = 'REQ_PENDING' | 'REQ_APPROVED' | 'REQ_REJECTED' |
 
 
 export interface RelocationRequest {
-  /** RequestNo (RL-yyyy-nnnn). */
+  /** RequestNo as returned by the API (e.g. "R0001"); shown verbatim, never parsed. */
   id: string
   items: RelocationItem[]
   /** layoutId is null when the zone is not drawn on any layout. */

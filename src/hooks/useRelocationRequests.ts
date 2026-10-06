@@ -51,6 +51,15 @@ export function useRelocationRequests(repo: RelocationRequestRepository = apiRel
     [repo, list],
   )
 
+  /** Rebuilds the Excel file of a request on the server. */
+  const regenerateExcel = useCallback(
+    async (requestNo: string) => {
+      if (!repo.regenerateExcel) throw new Error('Excel regeneration is not supported by this backend.')
+      return repo.regenerateExcel(requestNo)
+    },
+    [repo],
+  )
+
   /** Stored snapshot of one request (GET detail); falls back to the listed copy when the backend has no detail. */
   const get = useCallback(
     async (requestNo: string) => {
@@ -66,5 +75,5 @@ export function useRelocationRequests(repo: RelocationRequestRepository = apiRel
     void list()
   }, [list])
 
-  return { requests, loading, error, persistent, list, create, get, uploadDrawing }
+  return { requests, loading, error, persistent, list, create, get, uploadDrawing, regenerateExcel }
 }

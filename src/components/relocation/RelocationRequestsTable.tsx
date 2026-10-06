@@ -1,5 +1,8 @@
-import { Button, Chip, CircularProgress, type ChipProps, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
+import { Button, Chip, CircularProgress, type ChipProps, IconButton, ListItemIcon, ListItemText, Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@mui/material'
 import ImageOutlined from '@mui/icons-material/ImageOutlined'
+import MoreVertRounded from '@mui/icons-material/MoreVertRounded'
+import TableChartOutlined from '@mui/icons-material/TableChartOutlined'
+import { useState } from 'react'
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded'
 import { displayName } from '../../api/authApi'
 import type { Lang } from '../../types/fixedAsset'
@@ -32,6 +35,38 @@ interface Props {
   onReupload?: (request: RelocationRequest) => void
   /** Requests whose drawing is being uploaded (button disabled). */
   uploading?: ReadonlySet<string>
+  /** "Tạo lại Excel" in the row's action menu (POST /{requestNo}/excel). */
+  onRegenerateExcel?: (request: RelocationRequest) => void
+  /** Rows whose action menu is shown (the requester's own requests). */
+  canManage?: (request: RelocationRequest) => boolean
+  /** Requests whose Excel file is being rebuilt (menu item disabled). */
+  excelBusy?: ReadonlySet<string>
+}
+
+/** Small "⋮" menu of row actions; for now only "Tạo lại Excel". */
+function RowActions({ request: r, vi, onRegenerateExcel, busy }: { request: RelocationRequest; vi: boolean; onRegenerateExcel: (r: RelocationRequest) => void; busy: boolean }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const label = vi ? 'Tạo lại Excel' : 'Rebuild Excel'
+  return (
+    <>
+      <IconButton size="small" aria-label={`${vi ? 'Hành động' : 'Actions'} ${r.id}`} aria-haspopup="menu" aria-expanded={anchor !== null} onClick={(e) => setAnchor(e.currentTarget)}>
+        <MoreVertRounded fontSize="small" />
+      </IconButton>
+      <Menu anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
+        <MenuItem
+          dense
+          disabled={busy}
+          onClick={() => {
+            setAnchor(null)
+            onRegenerateExcel(r)
+          }}
+        >
+          <ListItemIcon>{busy ? <CircularProgress size={14} /> : <TableChartOutlined fontSize="small" />}</ListItemIcon>
+          <ListItemText>{busy ? (vi ? 'Đang tạo Excel…' : 'Building Excel…') : label}</ListItemText>
+        </MenuItem>
+      </Menu>
+    </>
+  )
 }
 
 /** Drawing cell: link icon (webUrl), image icon with the file name (stored without web address), or "re-upload". */
@@ -68,7 +103,7 @@ function DrawingCell({ request: r, vi, onReupload, busy }: { request: Relocation
   )
 }
 
-export function RelocationRequestsTable({ lang, requests, loading = false, onReupload, uploading }: Props) {
+export function RelocationRequestsTable({ lang, requests, loading = false, onReupload, uploading, onRegenerateExcel, canManage, excelBusy }: Props) {
   const vi = lang === 'vi'
   if (!requests.length) {
     return <Typography variant="body2" color="text.secondary">{loading ? (vi ? 'Đang tải...' : 'Loading...') : vi ? 'Chưa có yêu cầu nào.' : 'No requests yet.'}</Typography>
@@ -87,6 +122,7 @@ export function RelocationRequestsTable({ lang, requests, loading = false, onReu
             <TableCell>{vi ? 'Lý do' : 'Reason'}</TableCell>
             <TableCell>{vi ? 'Trạng thái' : 'Status'}</TableCell>
             <TableCell>{vi ? 'Bản vẽ' : 'Drawing'}</TableCell>
+            {onRegenerateExcel && <TableCell padding="checkbox" aria-label={vi ? 'Hành động' : 'Actions'} />}
           </TableRow>
         </TableHead>
         <TableBody>
@@ -101,6 +137,11 @@ export function RelocationRequestsTable({ lang, requests, loading = false, onReu
               <TableCell sx={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.reason || '-'}</TableCell>
               <TableCell><StatusChip status={r.status} vi={vi} /></TableCell>
               <TableCell><DrawingCell request={r} vi={vi} onReupload={onReupload} busy={uploading?.has(r.id) ?? false} /></TableCell>
+              {onRegenerateExcel && (
+                <TableCell padding="checkbox">
+                  {(canManage?.(r) ?? false) && <RowActions request={r} vi={vi} onRegenerateExcel={onRegenerateExcel} busy={excelBusy?.has(r.id) ?? false} />}
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>

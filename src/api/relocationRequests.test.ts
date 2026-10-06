@@ -21,7 +21,7 @@ afterEach(() => {
 describe('API relocation repository', () => {
   it('POSTs the request body and maps the 201 answer', async () => {
     const fetchMock = vi.fn(() =>
-      json({ requestNo: 'RL-2026-0001', status: 'REQ_PENDING', skipped: [], items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, moveType: 'building' }] }, 201),
+      json({ requestNo: 'R0001', status: 'REQ_PENDING', skipped: [], items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, moveType: 'building' }] }, 201),
     )
     vi.stubGlobal('fetch', fetchMock)
     const created = await new ApiRelocationRequestRepository('').create(input)
@@ -36,11 +36,11 @@ describe('API relocation repository', () => {
     })
     // The server takes the requester from the session; the cookie is sent.
     expect(init.credentials).toBe('include')
-    expect(created).toMatchObject({ id: 'RL-2026-0001', status: 'REQ_PENDING', items: [{ code: 'M1', name: 'Press', moveType: 'building' }], skipped: [] })
+    expect(created).toMatchObject({ id: 'R0001', status: 'REQ_PENDING', items: [{ code: 'M1', name: 'Press', moveType: 'building' }], skipped: [] })
   })
 
   it('sends the input date strings untouched (no Date / toISOString shift) and returns skipped', async () => {
-    const fetchMock = vi.fn(() => json({ requestNo: 'RL-2026-0002', status: 'REQ_PENDING', skipped: ['M9'], items: [] }, 201))
+    const fetchMock = vi.fn(() => json({ requestNo: 'R0002', status: 'REQ_PENDING', skipped: ['M9'], items: [] }, 201))
     vi.stubGlobal('fetch', fetchMock)
     const created = await new ApiRelocationRequestRepository('').create({ ...input, plannedMoveDate: '2026-12-31', plannedDoneDate: '2027-01-01' })
     const body = String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)
@@ -52,9 +52,9 @@ describe('API relocation repository', () => {
 
   it('lists newest requests oldest first', async () => {
     const req = (no: string) => ({ requestNo: no, status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: null, positionAAA: null }, status: 'REQ_PENDING' }] })
-    vi.stubGlobal('fetch', vi.fn(() => json({ items: [req('RL-2026-0002'), req('RL-2026-0001')], page: 0, size: 100, total: 2 })))
+    vi.stubGlobal('fetch', vi.fn(() => json({ items: [req('R0002'), req('R0001')], page: 0, size: 100, total: 2 })))
     const list = await new ApiRelocationRequestRepository('').list()
-    expect(list.map((r) => r.id)).toEqual(['RL-2026-0001', 'RL-2026-0002'])
+    expect(list.map((r) => r.id)).toEqual(['R0001', 'R0002'])
     expect(list[0]).toMatchObject({ plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', to: { layoutId: 'floor1', zone: 'A1-1' }, items: [{ code: 'M1', fromZone: 'A2', status: 'REQ_PENDING' }] })
   })
 
@@ -68,34 +68,48 @@ describe('API relocation repository', () => {
 
 describe('get (detail snapshot)', () => {
   it('GETs /{requestNo} and maps from / to per machine', async () => {
-    const detail = { requestNo: 'RL-2026-0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: null, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, status: 'REQ_PENDING' }] }
+    const detail = { requestNo: 'R0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: null, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, items: [{ machineCode: 'M1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A15', positionAA: 'A15-3', positionAAA: null }, status: 'REQ_PENDING' }] }
     const fetchMock = vi.fn(() => json(detail))
     vi.stubGlobal('fetch', fetchMock)
-    const r = await new ApiRelocationRequestRepository('').get('RL-2026-0001')
-    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/api/relocation-requests/RL-2026-0001')
+    const r = await new ApiRelocationRequestRepository('').get('R0001')
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/api/relocation-requests/R0001')
     expect(r.items[0]).toMatchObject({ code: 'M1', fromZone: 'A2-3', fromPositionA: 'A2', toZone: 'A15-3' })
     expect(r).toMatchObject({ requestedBy: 'E1', plannedMoveDate: '2026-10-05', createdAt: '2026-10-01T09:00:00' })
   })
 })
 
 describe('uploadDrawing', () => {
-  it('POSTs the PNG as multipart "file" to /{requestNo}/drawing and returns the stored file', async () => {
-    const fetchMock = vi.fn(() => json({ fileName: 'RL-2026-0001.png', webUrl: 'https://files.example/RL-2026-0001.png' }))
+  it('POSTs /{requestNo}/excel; a 2xx carrying excelError fails; create keeps excelError', async () => {
+    const fetchMock = vi.fn(() => json({ fileName: 'R0001.xlsx', webUrl: null }))
     vi.stubGlobal('fetch', fetchMock)
-    const saved = await new ApiRelocationRequestRepository('').uploadDrawing('RL-2026-0001', new Blob(['png'], { type: 'image/png' }))
+    await expect(new ApiRelocationRequestRepository('').regenerateExcel('R0001')).resolves.toEqual({ fileName: 'R0001.xlsx', webUrl: null })
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('/api/relocation-requests/RL-2026-0001/drawing')
+    expect(url).toBe('/api/relocation-requests/R0001/excel')
+    expect(init.method).toBe('POST')
+    vi.stubGlobal('fetch', vi.fn(() => json({ excelError: 'Template missing' })))
+    await expect(new ApiRelocationRequestRepository('').regenerateExcel('R0001')).rejects.toMatchObject({ message: 'Template missing' })
+    vi.stubGlobal('fetch', vi.fn(() => json({ requestNo: 'R0003', status: 'REQ_PENDING', skipped: [], items: [], excelError: 'Disk full' }, 201)))
+    const created = await new ApiRelocationRequestRepository('').create({ items: [], to: { layoutId: 'floor1', zone: 'A1-1' }, plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', reason: 'r' })
+    expect(created).toMatchObject({ id: 'R0003', excelError: 'Disk full' })
+  })
+
+  it('POSTs the PNG as multipart "file" to /{requestNo}/drawing and returns the stored file', async () => {
+    const fetchMock = vi.fn(() => json({ fileName: 'R0001.png', webUrl: 'https://files.example/R0001.png' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const saved = await new ApiRelocationRequestRepository('').uploadDrawing('R0001', new Blob(['png'], { type: 'image/png' }))
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/relocation-requests/R0001/drawing')
     expect(init.method).toBe('POST')
     const file = (init.body as FormData).get('file') as File
-    expect(file.name).toBe('RL-2026-0001.png')
+    expect(file.name).toBe('R0001.png')
     expect(file.type).toBe('image/png')
-    expect(saved).toEqual({ fileName: 'RL-2026-0001.png', webUrl: 'https://files.example/RL-2026-0001.png' })
+    expect(saved).toEqual({ fileName: 'R0001.png', webUrl: 'https://files.example/R0001.png', excelError: null })
   })
 
   it('throws RelocationApiError on failure; list maps drawingUrl and createdAt', async () => {
     vi.stubGlobal('fetch', vi.fn(() => json({ error: 'Storage offline' }, 503)))
-    await expect(new ApiRelocationRequestRepository('').uploadDrawing('RL-2026-0001', new Blob(['png']))).rejects.toMatchObject({ status: 503, message: 'Storage offline' })
-    const item = { requestNo: 'RL-2026-0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: 'https://x/a.png', to: { positionA: 'A1', positionAA: null, positionAAA: null }, items: [] }
+    await expect(new ApiRelocationRequestRepository('').uploadDrawing('R0001', new Blob(['png']))).rejects.toMatchObject({ status: 503, message: 'Storage offline' })
+    const item = { requestNo: 'R0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'r', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-06', createdAt: '2026-10-01T09:00:00', drawingUrl: 'https://x/a.png', to: { positionA: 'A1', positionAA: null, positionAAA: null }, items: [] }
     vi.stubGlobal('fetch', vi.fn(() => json({ items: [item] })))
     const [r] = await new ApiRelocationRequestRepository('').list()
     expect(r).toMatchObject({ drawingUrl: 'https://x/a.png', createdAt: '2026-10-01T09:00:00' })

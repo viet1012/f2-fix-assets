@@ -9,13 +9,25 @@ export type NewRelocationRequest = Omit<RelocationRequest, 'id' | 'status' | 'to
   to: RelocationTarget
   requestedBy?: string
 }
+/**
+ * The server also writes the request's Excel file when it creates a request / stores its drawing; `excelError` is set
+ * when that failed (the request and drawing are kept; POST /{requestNo}/excel builds it again).
+ */
+export interface ExcelOutcome {
+  excelError?: string | null
+}
 /** webUrl is null when the server has no web address for its drawings. */
-export interface UploadedDrawing {
+export interface UploadedDrawing extends ExcelOutcome {
   fileName: string
   webUrl: string | null
 }
 /** skipped: machines already at the destination (no row written by the API). */
-export type CreatedRelocationRequest = RelocationRequest & { skipped: readonly string[] }
+export type CreatedRelocationRequest = RelocationRequest & ExcelOutcome & { skipped: readonly string[] }
+/** Excel file stored by POST /{requestNo}/excel. */
+export interface SavedExcel {
+  fileName: string | null
+  webUrl: string | null
+}
 
 /** Storage-agnostic contract: the UI only talks to this. */
 export interface RelocationRequestRepository {
@@ -25,6 +37,8 @@ export interface RelocationRequestRepository {
   get?(requestNo: string): Promise<RelocationRequest>
   /** Stores (or replaces) the PNG drawing of a request. */
   uploadDrawing?(requestNo: string, png: Blob): Promise<UploadedDrawing>
+  /** Builds (or rebuilds) the Excel file of a request. */
+  regenerateExcel?(requestNo: string): Promise<SavedExcel>
   /** False when requests are only kept in memory (lost on reload). Omit for server-backed implementations. */
   isPersistent?(): boolean
 }
@@ -40,6 +54,7 @@ interface ApiCreateResponse {
   status: RelocationStatus
   items: { machineCode: string; from: ApiPosition; to: ApiPosition; moveType: string }[]
   skipped: string[]
+  excelError?: string | null
 }
 
 interface ApiRequest {
@@ -162,7 +177,7 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
         status: created.status,
       }
     })
-    return { ...input, requestedBy: input.requestedBy ?? '', id: created.requestNo, items, status: created.status, skipped: created.skipped ?? [] }
+    return { ...input, requestedBy: input.requestedBy ?? '', id: created.requestNo, items, status: created.status, skipped: created.skipped ?? [], excelError: created.excelError ?? null }
   }
 
   /** POST /api/relocation-requests/{requestNo}/drawing (multipart "file", PNG). */
@@ -170,8 +185,16 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
     const body = new FormData()
     body.append('file', png, `${requestNo}.png`)
     const response = await apiFetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}/drawing`, { method: 'POST', body })
-    const saved = await readApi<{ fileName?: string; webUrl?: string | null }>(response)
-    return { fileName: saved.fileName ?? `${requestNo}.png`, webUrl: saved.webUrl ?? null }
+    const saved = await readApi<{ fileName?: string; webUrl?: string | null; excelError?: string | null }>(response)
+    return { fileName: saved.fileName ?? `${requestNo}.png`, webUrl: saved.webUrl ?? null, excelError: saved.excelError ?? null }
+  }
+
+  /** POST /api/relocation-requests/{requestNo}/excel; a 2xx answer that still carries excelError is a failure. */
+  async regenerateExcel(requestNo: string): Promise<SavedExcel> {
+    const response = await apiFetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}/excel`, { method: 'POST' })
+    const saved = await readApi<{ fileName?: string | null; webUrl?: string | null; excelError?: string | null }>(response)
+    if (saved.excelError) throw new RelocationApiError(response.status, saved.excelError)
+    return { fileName: saved.fileName ?? null, webUrl: saved.webUrl ?? null }
   }
 }
 

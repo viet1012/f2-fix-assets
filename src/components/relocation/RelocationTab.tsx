@@ -188,6 +188,11 @@ function CardTitle({ color, children }: { color: string; children: ReactNode }) 
 
 /** Drawing of the request just created: exported + uploaded after the 201. */
 type DrawingState = { status: 'saving' } | { status: 'saved'; webUrl: string | null; fileName: string } | { status: 'failed' }
+/**
+ * Excel file the server writes with the request: unknown until the drawing is stored (pending), saved, failed (the
+ * create or drawing response carried excelError), or being rebuilt (POST /{requestNo}/excel).
+ */
+type ExcelState = 'pending' | 'saving' | 'saved' | 'failed'
 
 /** Relocation request tab: assets and zones come from the location API (Factory 2, every div), never from static data. */
 /** account: the logged-in user (session), shown as the requester and used for "my requests". */
@@ -229,7 +234,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   // Browse by zone: machines are where they are now (Outside excluded: nothing there can be picked).
   const zonesByFac = useMemo(() => sourceZonesByFac(rows.filter((r) => !isOutside(r)), ctx), [rows, isOutside, ctx])
   const draft = useRelocationDraft(byCode)
-  const { requests, loading, persistent, create, get: getRequest, uploadDrawing } = useRelocationRequests()
+  const { requests, loading, persistent, create, get: getRequest, uploadDrawing, regenerateExcel } = useRelocationRequests()
   const pendingCodes = useMemo(() => pendingCodesOf(requests), [requests])
   const [afterLayoutId, setAfterLayoutId] = useState<LayoutId | null>(null)
   /** Before map layout chosen by the user (browsing); null = follow the selected machines. */
@@ -266,13 +271,16 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   const isMine = (r: RelocationRequest) => r.requestedBy.trim().toLowerCase() === account.trim().toLowerCase()
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [lastCreated, setLastCreated] = useState<{ id: string; count: number; skipped: readonly string[]; drawing: DrawingState } | null>(null)
+  const [lastCreated, setLastCreated] = useState<{ id: string; skipped: readonly string[]; drawing: DrawingState; excel: ExcelState } | null>(null)
   /** Export input and PNG per request, kept for "retry" and "download" (the draft is reset after a submit). */
   const exportInputs = useRef(new Map<string, RelocationExportInput>())
   const pngs = useRef(new Map<string, Blob>())
   /** Requests of the table whose drawing is being re-uploaded, and the last re-upload error. */
   const [tableUploads, setTableUploads] = useState<ReadonlySet<string>>(new Set())
   const [drawingError, setDrawingError] = useState<string | null>(null)
+  /** Requests of the table whose Excel file is being rebuilt, and the last success message. */
+  const [tableExcel, setTableExcel] = useState<ReadonlySet<string>>(new Set())
+  const [excelNotice, setExcelNotice] = useState<string | null>(null)
   /** Machines of the last 409 (already in an open request), marked red in the selected table. */
   const [conflictCodes, setConflictCodes] = useState<ReadonlySet<string>>(new Set())
 
@@ -440,14 +448,44 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
     return png
   }
   const setDrawing = (id: string, drawing: DrawingState) => setLastCreated((c) => (c?.id === id ? { ...c, drawing } : c))
+  const setExcel = (id: string, excel: ExcelState) => setLastCreated((c) => (c?.id === id ? { ...c, excel } : c))
   /** Export (once) + upload; a failure keeps the request, the banner offers "retry". */
   const saveDrawing = async (id: string) => {
     setDrawing(id, { status: 'saving' })
     try {
       const saved = await uploadDrawing(id, await pngOf(id))
       setDrawing(id, { status: 'saved', webUrl: saved.webUrl, fileName: saved.fileName })
+      // A failure reported earlier (create) stays until "Tạo lại Excel" succeeds.
+      setLastCreated((c) => (c?.id === id && c.excel !== 'failed' ? { ...c, excel: saved.excelError ? 'failed' : 'saved' } : c))
     } catch {
       setDrawing(id, { status: 'failed' })
+    }
+  }
+  /** Guards double clicks before the disabled menu item re-renders. */
+  const rebuildingExcel = useRef(new Set<string>())
+  /** POST /{requestNo}/excel, from the banner or the table menu. */
+  const rebuildExcel = async (id: string) => {
+    if (rebuildingExcel.current.has(id)) return
+    rebuildingExcel.current.add(id)
+    setDrawingError(null)
+    setExcelNotice(null)
+    setExcel(id, 'saving')
+    setTableExcel((prev) => new Set(prev).add(id))
+    try {
+      await regenerateExcel(id)
+      setExcel(id, 'saved')
+      setExcelNotice(vi ? `Đã tạo lại Excel cho ${id}` : `Excel rebuilt for ${id}`)
+    } catch (e) {
+      setExcel(id, 'failed')
+      if (e instanceof RelocationApiError && e.status === 403) setDrawingError(vi ? 'Chỉ người tạo mới được tạo lại Excel' : 'Only the requester can rebuild the Excel file')
+      else setDrawingError(`${vi ? `Chưa tạo lại được Excel ${id}` : `Could not rebuild the Excel file of ${id}`}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      rebuildingExcel.current.delete(id)
+      setTableExcel((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
     }
   }
   const downloadPng = async (id: string) => {
@@ -514,7 +552,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
         afterLayout: layoutOf(draft.target.layoutId) ?? null,
         ctx,
       })
-      setLastCreated({ id: created.id, count: created.items.length, skipped: created.skipped, drawing: { status: 'saving' } })
+      setLastCreated({ id: created.id, skipped: created.skipped, drawing: { status: 'saving' }, excel: created.excelError ? 'failed' : 'pending' })
       void saveDrawing(created.id)
       draft.reset()
       setAfterLayoutId(null)
@@ -541,15 +579,21 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       )}
       {lastCreated && (
         <Alert
-          severity={lastCreated.drawing.status === 'failed' ? 'warning' : 'success'}
+          severity={lastCreated.drawing.status === 'failed' || lastCreated.excel === 'failed' ? 'warning' : 'success'}
           onClose={() => setLastCreated(null)}
           data-testid="reloc-created"
           data-drawing={lastCreated.drawing.status}
+          data-excel={lastCreated.excel}
           action={
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               {lastCreated.drawing.status === 'failed' && (
                 <Button size="small" color="inherit" variant="outlined" onClick={() => void saveDrawing(lastCreated.id)}>
                   {vi ? 'Thử lại' : 'Retry'}
+                </Button>
+              )}
+              {lastCreated.excel === 'failed' && (
+                <Button size="small" color="inherit" variant="outlined" onClick={() => void rebuildExcel(lastCreated.id)}>
+                  {vi ? 'Tạo lại Excel' : 'Rebuild Excel'}
                 </Button>
               )}
               <Button size="small" color="inherit" onClick={() => void downloadPng(lastCreated.id)}>
@@ -562,20 +606,21 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
             ? vi
               ? `Đã tạo ${lastCreated.id} nhưng chưa lưu được bản vẽ`
               : `Created ${lastCreated.id} but the drawing could not be saved`
-            : vi
-              ? `Đã tạo ${lastCreated.id} (${lastCreated.count} máy)`
-              : `Created ${lastCreated.id} (${lastCreated.count} ${lastCreated.count === 1 ? 'machine' : 'machines'})`}
+            : `${vi ? 'Đã tạo' : 'Created'} ${lastCreated.id}`}
           {lastCreated.drawing.status === 'saving' && (vi ? ' · Đang lưu bản vẽ...' : ' · Saving the drawing...')}
+          {lastCreated.drawing.status === 'saved' && (vi ? ' · Đã lưu bản vẽ' : ' · Drawing saved')}
+          {lastCreated.excel === 'saved' && (vi ? ' · Đã lưu Excel' : ' · Excel saved')}
+          {lastCreated.excel === 'saving' && (vi ? ' · Đang tạo Excel...' : ' · Building the Excel file...')}
+          {lastCreated.excel === 'failed' && (vi ? ' · Chưa lưu được Excel' : ' · Excel file not saved')}
           {lastCreated.drawing.status === 'saved' && (
             <>
-              {vi ? ' · Đã lưu bản vẽ' : ' · Drawing saved'}
-              {' '}
+              {' · '}
               {lastCreated.drawing.webUrl ? (
                 <Link href={lastCreated.drawing.webUrl} target="_blank" rel="noopener noreferrer" data-testid="reloc-drawing-link">
-                  {vi ? 'Mở file' : 'Open file'}
+                  {vi ? 'Mở bản vẽ' : 'Open drawing'}
                 </Link>
               ) : (
-                `(${lastCreated.drawing.fileName})`
+                lastCreated.drawing.fileName
               )}
             </>
           )}
@@ -584,6 +629,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
         </Alert>
       )}
       {drawingError && <Alert severity="error" onClose={() => setDrawingError(null)}>{drawingError}</Alert>}
+      {excelNotice && <Alert severity="success" onClose={() => setExcelNotice(null)}>{excelNotice}</Alert>}
 
       <GlobalStyles styles={RING_PROPERTY} />
       <GlobalStyles styles={ringStyles} />
@@ -777,7 +823,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           />
         }
       >
-        <RelocationRequestsTable lang={lang} requests={mineOnly ? requests.filter(isMine) : requests} loading={loading} onReupload={(r) => void reupload(r)} uploading={tableUploads} />
+        <RelocationRequestsTable lang={lang} requests={mineOnly ? requests.filter(isMine) : requests} loading={loading} onReupload={(r) => void reupload(r)} uploading={tableUploads} onRegenerateExcel={(r) => void rebuildExcel(r.id)} canManage={isMine} excelBusy={tableExcel} />
       </SectionCard>
     </Stack>
   )

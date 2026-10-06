@@ -163,7 +163,7 @@ describe('RelocationTab - browse by zone', () => {
   it('machines in an open request and wrong-kind machines are disabled and cannot be selected', async () => {
     mockFetch(false, [
       {
-        requestNo: 'RL-2026-0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'x', plannedMoveDate: '2026-10-01', plannedDoneDate: '2026-10-02',
+        requestNo: 'R0001', status: 'REQ_PENDING', requestedBy: 'E1', reason: 'x', plannedMoveDate: '2026-10-01', plannedDoneDate: '2026-10-02',
         to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null },
         items: [{ machineCode: 'A-006-2', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, status: 'REQ_PENDING' }],
       },
@@ -172,7 +172,7 @@ describe('RelocationTab - browse by zone', () => {
     await openA23(container)
     await waitFor(() => expect(item('A-006-2').getAttribute('data-reason')).toBe('pending'))
     // Submitted requests table: RequestNo and translated status.
-    expect(screen.getByText('RL-2026-0001')).toBeTruthy()
+    expect(screen.getByText('R0001')).toBeTruthy()
     expect(screen.getByText('Chờ duyệt')).toBeTruthy()
     expect(box('A-006-2').disabled).toBe(true)
     fireEvent.click(item('A-006-2').querySelector('[role="button"]')!)
@@ -590,9 +590,9 @@ describe('RelocationTab - guided flow', () => {
 
 describe('RelocationTab - submit', { timeout: 20000 }, () => {
   const today = todayIso()
-  const DRAWING_URL = 'https://files.example/drawings/RL-2026-0001.png'
+  const DRAWING_URL = 'https://files.example/drawings/R0001.png'
   const apiReq = (drawingUrl: string | null) => ({
-    requestNo: 'RL-2026-0001',
+    requestNo: 'R0001',
     status: 'REQ_PENDING',
     requestedBy: 'E001',
     reason: 'Re-layout',
@@ -606,19 +606,21 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
   const created201 = () =>
     json(
       {
-        requestNo: 'RL-2026-0001',
+        requestNo: 'R0001',
         status: 'REQ_PENDING',
         skipped: ['A-006-2'],
         items: [{ machineCode: 'A-006-1', from: { positionA: 'A2', positionAA: 'A2-3', positionAAA: null }, to: { positionA: 'A1', positionAA: 'A1-1', positionAAA: null }, moveType: 'same' }],
       },
       201,
     )
-  const drawingOk = () => json({ fileName: 'RL-2026-0001.png', webUrl: DRAWING_URL })
+  const drawingOk = () => json({ fileName: 'R0001.png', webUrl: DRAWING_URL })
   /** POST create / POST drawing answers; GET returns what was stored. */
-  function mockSubmit(post: () => Promise<Response>, drawing: () => Promise<Response> = drawingOk, initial: unknown[] = [], detail?: unknown) {
+  const excelOk = () => json({ fileName: 'R0001.xlsx', webUrl: null })
+  function mockSubmit(post: () => Promise<Response>, drawing: () => Promise<Response> = drawingOk, initial: unknown[] = [], detail?: unknown, excel: () => Promise<Response> = excelOk) {
     let stored: ReturnType<typeof apiReq>[] = initial as ReturnType<typeof apiReq>[]
     const fn = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.endsWith('/excel') && init?.method === 'POST') return excel()
       if (url.includes('/drawing') && init?.method === 'POST') {
         return drawing().then((r) => {
           if (r.ok) stored = [apiReq(DRAWING_URL)]
@@ -632,7 +634,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
         })
       }
       // GET detail: the stored snapshot (from = *_BF, to = *_AT per machine).
-      if (/\/api\/relocation-requests\/RL-[^/?]+$/.test(url)) return json(detail ?? stored[0])
+      if (/\/api\/relocation-requests\/[^/?]+$/.test(url)) return json(detail ?? stored[0])
       if (url.includes('/api/relocation-requests')) return json({ items: stored, page: 0, size: 100, total: stored.length })
       if (url.includes('/api/assets/with-location')) return json(SAMPLE_ASSETS)
       if (url.includes('/api/locations')) return json(SAMPLE_LOCATIONS)
@@ -641,7 +643,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     vi.stubGlobal('fetch', fn)
     return fn
   }
-  const drawingPosts = (fn: ReturnType<typeof mockSubmit>) => fn.mock.calls.filter(([u, init]) => String(u).endsWith('/api/relocation-requests/RL-2026-0001/drawing') && init?.method === 'POST')
+  const drawingPosts = (fn: ReturnType<typeof mockSubmit>) => fn.mock.calls.filter(([u, init]) => String(u).endsWith('/api/relocation-requests/R0001/drawing') && init?.method === 'POST')
   const fillAndSubmit = async () => {
     await screen.findByLabelText('Chọn máy')
     pasteCodes('A-006-1 A-006-2')
@@ -666,8 +668,10 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     render(<RelocationTab lang="vi" account="E001" />)
     await fillAndSubmit()
     await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('saved'))
-    expect(banner().textContent).toContain('Đã tạo RL-2026-0001 (1 máy)')
-    expect(banner().textContent).toContain('Đã lưu bản vẽ')
+    // The request number is shown verbatim from the API.
+    expect(banner().textContent).toContain('Đã tạo R0001 · Đã lưu bản vẽ · Đã lưu Excel')
+    expect(banner().getAttribute('data-excel')).toBe('saved')
+    expect(within(banner()).queryByRole('button', { name: 'Tạo lại Excel' })).toBeNull()
     expect(banner().textContent).toContain('A-006-2')
     expect(screen.getByTestId('reloc-drawing-link').getAttribute('href')).toBe(DRAWING_URL)
     const post = fetchMock.mock.calls.find(([u, init]) => String(u).endsWith('/api/relocation-requests') && init?.method === 'POST')!
@@ -680,7 +684,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     // The PNG is built from the snapshot taken before the reset: the machine written by the API, its target.
     expect(exportRelocationPng).toHaveBeenCalledTimes(1)
     const input = vi.mocked(exportRelocationPng).mock.calls[0][0]
-    expect(input.request.id).toBe('RL-2026-0001')
+    expect(input.request.id).toBe('R0001')
     // PNG "Requested by" = the session account.
     expect(input.request.requestedBy).toBe('E001')
     expect(input.rows.map((r) => r.code)).toEqual(['A-006-1'])
@@ -690,12 +694,12 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     expect(upload).toHaveLength(1)
     const file = (upload[0][1]!.body as FormData).get('file') as File
     expect(file.type).toBe('image/png')
-    expect(file.name).toBe('RL-2026-0001.png')
+    expect(file.name).toBe('R0001.png')
     expect(screen.getByTestId('selected-count').textContent).toBe('0')
     expect((screen.getByLabelText(/Ngày dự kiến/) as HTMLInputElement).value).toBe('')
     const table = screen.getByRole('table', { name: 'Yêu cầu đã gửi' })
     expect(within(table).getAllByText(`${today.slice(8, 10)}/${today.slice(5, 7)}/${today.slice(0, 4)}`)).toHaveLength(2)
-    await waitFor(() => expect(within(table).getByTestId('drawing-link-RL-2026-0001').getAttribute('href')).toBe(DRAWING_URL))
+    await waitFor(() => expect(within(table).getByTestId('drawing-link-R0001').getAttribute('href')).toBe(DRAWING_URL))
     // Initial load, reload after the POST, reload after the upload.
     expect(fetchMock.mock.calls.filter(([u, init]) => String(u).includes('/api/relocation-requests') && init?.method !== 'POST')).toHaveLength(3)
   })
@@ -706,9 +710,9 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     render(<RelocationTab lang="vi" account="E001" />)
     await fillAndSubmit()
     await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('failed'))
-    expect(banner().textContent).toContain('Đã tạo RL-2026-0001 nhưng chưa lưu được bản vẽ')
+    expect(banner().textContent).toContain('Đã tạo R0001 nhưng chưa lưu được bản vẽ')
     const table = screen.getByRole('table', { name: 'Yêu cầu đã gửi' })
-    expect(within(table).getByText('RL-2026-0001')).toBeTruthy()
+    expect(within(table).getByText('R0001')).toBeTruthy()
     expect(within(table).getByRole('button', { name: 'Tải lên lại' })).toBeTruthy()
 
     fail = false
@@ -716,7 +720,43 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('saved'))
     expect(drawingPosts(fetchMock)).toHaveLength(2)
     expect(exportRelocationPng).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(within(table).getByTestId('drawing-link-RL-2026-0001')).toBeTruthy())
+    await waitFor(() => expect(within(table).getByTestId('drawing-link-R0001')).toBeTruthy())
+  })
+
+  it('excelError in the create response: "Chưa lưu được Excel" + "Tạo lại Excel", which POSTs /{no}/excel', async () => {
+    const withExcelError = () =>
+      created201().then(async (r) => json({ ...(await r.json()), excelError: 'SharePoint offline' }, 201))
+    const fetchMock = mockSubmit(withExcelError)
+    render(<RelocationTab lang="vi" account="E001" />)
+    await fillAndSubmit()
+    await waitFor(() => expect(banner().getAttribute('data-drawing')).toBe('saved'))
+    expect(banner().textContent).toContain('Đã tạo R0001 · Đã lưu bản vẽ · Chưa lưu được Excel')
+    expect(banner().getAttribute('data-excel')).toBe('failed')
+    fireEvent.click(within(banner()).getByRole('button', { name: 'Tạo lại Excel' }))
+    await waitFor(() => expect(banner().getAttribute('data-excel')).toBe('saved'))
+    expect(banner().textContent).toContain('Đã lưu Excel')
+    const posts = fetchMock.mock.calls.filter(([u, init]) => String(u).endsWith('/api/relocation-requests/R0001/excel') && init?.method === 'POST')
+    expect(posts).toHaveLength(1)
+  })
+
+  it('excelError in the drawing response: the banner offers "Tạo lại Excel" too', async () => {
+    mockSubmit(created201, () => json({ fileName: 'R0001.png', webUrl: DRAWING_URL, excelError: 'Template missing' }))
+    render(<RelocationTab lang="vi" account="E001" />)
+    await fillAndSubmit()
+    await waitFor(() => expect(banner().getAttribute('data-excel')).toBe('failed'))
+    expect(banner().textContent).toContain('Chưa lưu được Excel')
+    expect(within(banner()).getByRole('button', { name: 'Tạo lại Excel' })).toBeTruthy()
+  })
+
+  it('table action menu "Tạo lại Excel": only on my requests, POSTs /{no}/excel', async () => {
+    const fetchMock = mockSubmit(created201, drawingOk, [apiReq(null), { ...apiReq(null), requestNo: 'R0002', requestedBy: 'E999' }])
+    render(<RelocationTab lang="vi" account="E001" />)
+    const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
+    expect(within(table).queryByRole('button', { name: 'Hành động R0002' })).toBeNull()
+    fireEvent.click(within(table).getByRole('button', { name: 'Hành động R0001' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Tạo lại Excel' }))
+    expect(await screen.findByText('Đã tạo lại Excel cho R0001')).toBeTruthy()
+    expect(fetchMock.mock.calls.filter(([u, init]) => String(u).endsWith('/api/relocation-requests/R0001/excel') && init?.method === 'POST')).toHaveLength(1)
   })
 
   it('"Tải PNG về máy" downloads the PNG of the request', async () => {
@@ -728,7 +768,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1))
     const [blob, name] = vi.mocked(downloadBlob).mock.calls[0]
     expect(blob.type).toBe('image/png')
-    expect(name).toBe('RL-2026-0001.png')
+    expect(name).toBe('R0001.png')
   })
 
   it('table "Tải lên lại": rebuilds the PNG from the GET detail snapshot, not from where the machine is now', async () => {
@@ -746,8 +786,8 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     render(<RelocationTab lang="vi" account="E001" />)
     const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
     fireEvent.click(within(table).getByRole('button', { name: 'Tải lên lại' }))
-    await waitFor(() => expect(within(table).getByTestId('drawing-link-RL-2026-0001')).toBeTruthy())
-    expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/relocation-requests/RL-2026-0001'))).toBe(true)
+    await waitFor(() => expect(within(table).getByTestId('drawing-link-R0001')).toBeTruthy())
+    expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/relocation-requests/R0001'))).toBe(true)
     expect(drawingPosts(fetchMock)).toHaveLength(1)
     expect(exportRelocationPng).toHaveBeenCalledTimes(1)
     const input = vi.mocked(exportRelocationPng).mock.calls[0][0]
@@ -760,7 +800,7 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
 
   it('table "Tải lên lại": spinner + "Đang tạo bản vẽ…" while building, repeated clicks ignored', async () => {
     let release: () => void = () => {}
-    const fetchMock = mockSubmit(created201, () => new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ fileName: 'RL-2026-0001.png', webUrl: DRAWING_URL }), { status: 200, headers: { 'Content-Type': 'application/json' } })) }), [apiReq(null)])
+    const fetchMock = mockSubmit(created201, () => new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ fileName: 'R0001.png', webUrl: DRAWING_URL }), { status: 200, headers: { 'Content-Type': 'application/json' } })) }), [apiReq(null)])
     render(<RelocationTab lang="vi" account="E001" />)
     const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
     const button = within(table).getByRole('button', { name: 'Tải lên lại' })
@@ -768,22 +808,22 @@ describe('RelocationTab - submit', { timeout: 20000 }, () => {
     fireEvent.click(button)
     const busy = await within(table).findByRole('button', { name: 'Đang tạo bản vẽ…' })
     expect((busy as HTMLButtonElement).disabled).toBe(true)
-    expect(within(table).getByTestId('drawing-spinner-RL-2026-0001')).toBeTruthy()
+    expect(within(table).getByTestId('drawing-spinner-R0001')).toBeTruthy()
     await waitFor(() => expect(drawingPosts(fetchMock)).toHaveLength(1))
     act(() => release())
-    await waitFor(() => expect(within(table).getByTestId('drawing-link-RL-2026-0001')).toBeTruthy())
+    await waitFor(() => expect(within(table).getByTestId('drawing-link-R0001')).toBeTruthy())
     expect(drawingPosts(fetchMock)).toHaveLength(1)
     expect(exportRelocationPng).toHaveBeenCalledTimes(1)
   })
 
   it('"Chỉ yêu cầu của tôi" keeps only the requests of the logged-in account', async () => {
-    mockSubmit(created201, drawingOk, [apiReq(null), { ...apiReq(null), requestNo: 'RL-2026-0002', requestedBy: 'E999' }])
+    mockSubmit(created201, drawingOk, [apiReq(null), { ...apiReq(null), requestNo: 'R0002', requestedBy: 'E999' }])
     render(<RelocationTab lang="vi" account="e001" />)
     const table = await screen.findByRole('table', { name: 'Yêu cầu đã gửi' })
-    expect(within(table).getByText('RL-2026-0002')).toBeTruthy()
+    expect(within(table).getByText('R0002')).toBeTruthy()
     fireEvent.click(screen.getByRole('switch', { name: 'Chỉ yêu cầu của tôi' }))
-    expect(within(table).getByText('RL-2026-0001')).toBeTruthy()
-    expect(within(table).queryByText('RL-2026-0002')).toBeNull()
+    expect(within(table).getByText('R0001')).toBeTruthy()
+    expect(within(table).queryByText('R0002')).toBeNull()
   })
 
   it('re-upload answered 403: "Chỉ người tạo mới được tải lên lại"', async () => {

@@ -18,7 +18,7 @@ const ctx: RelocationContext = { ...DEFAULT_CONTEXT, zoneFac: new Map([['A2-3', 
 const REASON = 'Di dời để bố trí lại dây chuyền ép'
 const input: RelocationExportInput = {
   lang: 'vi',
-  request: { id: 'RL-2026-0001', requestedBy: 'E001', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-31', createdAt: '2026-10-01T09:15:00', reason: REASON },
+  request: { id: 'R0001', requestedBy: 'E001', plannedMoveDate: '2026-10-05', plannedDoneDate: '2026-10-31', createdAt: '2026-10-01T09:15:00', reason: REASON },
   rows: [row('A-006-1', 'Máy dập thủy lực', 'A2-3')],
   target: { layoutId: 'floor1', zone: 'A3-1' },
   beforeLayout: floor1,
@@ -110,7 +110,7 @@ describe('exportRelocationPng', () => {
   it('always English (lang="vi"): title, header fields, yyyy-MM-dd dates, buildings, Before / After, badges', async () => {
     const { texts, d } = await run()
     const all = texts()
-    expect(all).toContain('Machine Relocation Request RL-2026-0001')
+    expect(all).toContain('Machine Relocation Request R0001')
     expect(all).toContain('Created: 2026-10-01 09:15   ·   Requested by: Unknown name (E001)   ·   Planned move: 2026-10-05   ·   Planned completion: 2026-10-31')
     expect(all).toContain('1 machine → Building A / 1F / A3-1')
     expect(all).toContain('Before · Building A / 1F')
@@ -217,7 +217,7 @@ describe('exportRelocationPng', () => {
     const now = vi.spyOn(performance, 'now')
     await run()
     expect(now).toHaveBeenCalled()
-    expect(console.debug).toHaveBeenCalledWith(expect.stringMatching(/^\[relocation\] PNG RL-2026-0001: \d+ ms, \d+ bytes$/))
+    expect(console.debug).toHaveBeenCalledWith(expect.stringMatching(/^\[relocation\] PNG R0001: \d+ ms, \d+ bytes$/))
   })
 
   it('rejects when the canvas cannot encode', async () => {
@@ -229,7 +229,7 @@ describe('exportRelocationPng', () => {
 
 describe('snapshotExportInput', () => {
   const snapshot: RelocationRequest = {
-    id: 'RL-2026-0007',
+    id: 'R0007',
     items: [
       { code: 'A-006-1', name: '', fromZone: 'A1-1', fromFloor: null, moveType: null, fromPositionA: 'A1', toZone: 'A3-1' },
       { code: 'A-009-9', name: '', fromZone: 'A7', fromFloor: null, moveType: null, fromPositionA: 'A7', toZone: 'A3-1' },
