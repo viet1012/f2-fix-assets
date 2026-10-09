@@ -1,5 +1,6 @@
 import { alpha, Box, Button, Stack, Typography, useTheme } from '@mui/material'
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded'
+import HelpOutline from '@mui/icons-material/HelpOutlineOutlined'
 import EastRounded from '@mui/icons-material/EastRounded'
 import ViewInArRounded from '@mui/icons-material/ViewInArRounded'
 import type { ReactNode } from 'react'
@@ -129,7 +130,7 @@ const TEXT = {
     same: 'Cùng tầng', floorChange: 'Đổi tầng', buildingChange: 'Đổi toà',
     current: 'Hiện tại', old: 'Vị trí cũ', next: 'Vị trí mới', view3d: 'Xem 3D',
     start: 'Ngày dự kiến', end: 'Ngày hoàn thành', reason: 'Lý do', reasonValue: 'Gom máy mài về một line',
-    saved: 'Đã lưu', go: 'Đi tới Di dời máy',
+    saved: 'Đã lưu', go: 'Đi tới Di dời máy', tour: 'Xem hướng dẫn tương tác',
   },
   en: {
     steps: [
@@ -172,13 +173,14 @@ const TEXT = {
     same: 'Same floor', floorChange: 'Floor change', buildingChange: 'Building change',
     current: 'Current', old: 'Old location', next: 'New location', view3d: 'View 3D',
     start: 'Planned date', end: 'Completion date', reason: 'Reason', reasonValue: 'Group grinders into one line',
-    saved: 'Saved', go: 'Go to Machine relocation',
+    saved: 'Saved', go: 'Go to Machine relocation', tour: 'Start the interactive tour',
   },
 } as const
 
 const STEP_TONE: Tone[] = ['from', 'to', 'cross', 'neutral']
 
-export default function RelocationGuide({ lang, onNavigate }: { lang: Lang; onNavigate?: () => void }) {
+/** onTour: opens the relocation tab and starts its interactive tour. */
+export default function RelocationGuide({ lang, onNavigate, onTour }: { lang: Lang; onNavigate?: () => void; onTour?: () => void }) {
   const tx = TEXT[lang]
   const c = useTone()
   const theme = useTheme()
@@ -268,10 +270,11 @@ export default function RelocationGuide({ lang, onNavigate }: { lang: Lang; onNa
           )
         })}
       </Box>
-      {onNavigate && (
-        <Box>
-          <Button variant="contained" endIcon={<ArrowForwardRounded />} onClick={onNavigate}>{tx.go}</Button>
-        </Box>
+      {(onNavigate || onTour) && (
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          {onNavigate && <Button variant="contained" endIcon={<ArrowForwardRounded />} onClick={onNavigate}>{tx.go}</Button>}
+          {onTour && <Button variant="outlined" startIcon={<HelpOutline />} onClick={onTour} data-testid="guide-reloc-tour">{tx.tour}</Button>}
+        </Stack>
       )}
     </Stack>
   )

@@ -36,6 +36,9 @@ interface Props<R extends Row> {
    * a click outside. Never called while picking, so the focus stays in the input.
    */
   onNext?: () => void
+  /** Building quick filter, controlled (the tour sets and restores it); uncontrolled when omitted. */
+  facFilter?: string | null
+  onFacFilterChange?: (fac: string | null) => void
 }
 
 // No limit: every eligible machine is searchable by code, name or current zone (all words, any order).
@@ -71,14 +74,16 @@ const REPORT_LABELS: Record<Exclude<keyof CodeCheck, 'accepted'>, { vi: string; 
   pending: { vi: 'Đang có yêu cầu PENDING', en: 'Already in a PENDING request' },
 }
 
-export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, selected, selectedRows, pendingCodes, conflictCodes, isOutside, facOf, onHoverZone, onAdd, onRemove, onClear, onNext }: Props<R>) {
+export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, selected, selectedRows, pendingCodes, conflictCodes, isOutside, facOf, onHoverZone, onAdd, onRemove, onClear, onNext, facFilter: facFilterProp, onFacFilterChange }: Props<R>) {
   const vi = lang === 'vi'
   const [report, setReport] = useState<CodeCheck | null>(null)
   const [input, setInput] = useState('')
   // Filtering follows a deferred copy so typing stays instant while the list catches up.
   const query = useDeferredValue(input)
   // Building quick filter (null = all); component state only.
-  const [facFilter, setFacFilter] = useState<string | null>(null)
+  const [facFilterState, setFacFilterState] = useState<string | null>(null)
+  const facFilter = facFilterProp !== undefined ? facFilterProp : facFilterState
+  const setFacFilter = (fac: string | null) => (onFacFilterChange ? onFacFilterChange(fac) : setFacFilterState(fac))
   // Groups are collapsed by default and open while searching. `browseOpen`: groups the user opened with no search;
   // `searchClosed`: groups the user collapsed during the search `q` (forgotten once the search changes).
   const [browseOpen, setBrowseOpen] = useState<ReadonlySet<string>>(() => new Set())
@@ -239,10 +244,12 @@ export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, s
   return (
     <Stack spacing={1.25}>
       {facChips.length > 0 && (
-        <FacChips facs={facChips} value={facFilter} total={options.length} onChange={setFacFilter} allLabel={vi ? 'Tất cả' : 'All'} label={vi ? 'Lọc theo toà' : 'Filter by building'} />
+        <Box data-tour="fac-chips">
+          <FacChips facs={facChips} value={facFilter} total={options.length} onChange={setFacFilter} allLabel={vi ? 'Tất cả' : 'All'} label={vi ? 'Lọc theo toà' : 'Filter by building'} />
+        </Box>
       )}
       <PopupHeaderContext.Provider value={popupHeader}>
-      <Box sx={(theme) => ({ ...glassFilterControls(theme), '& .MuiAutocomplete-inputRoot.MuiOutlinedInput-root': { height: 'auto', minHeight: 36 } })}>
+      <Box data-tour="machine-input" sx={(theme) => ({ ...glassFilterControls(theme), '& .MuiAutocomplete-inputRoot.MuiOutlinedInput-root': { height: 'auto', minHeight: 36 } })}>
         <Autocomplete<Row, true, false, true>
           multiple
           freeSolo
@@ -322,7 +329,7 @@ export function MachinePicker<R extends Row>({ lang, rows, byCode: rowsByCode, s
       )}
 
       {selectedRows.length > 0 && (
-        <TableContainer sx={{ maxHeight: 200 }}>
+        <TableContainer sx={{ maxHeight: 200 }} data-tour="selected-table">
           <Table size="small" stickyHeader aria-label={vi ? 'Máy đã chọn' : 'Selected machines'}>
             <TableHead>
               <TableRow>

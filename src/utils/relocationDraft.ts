@@ -16,6 +16,8 @@ export type RelocationDraftAction =
   | { type: 'setTarget'; target: RelocationTarget | null }
   | { type: 'setBeforeLayout'; layoutId: LayoutId | null }
   | { type: 'reset' }
+  /** Puts back a saved state as is (the tour restores the user's draft). */
+  | { type: 'restore'; state: RelocationDraftState }
 
 export const INITIAL_DRAFT: RelocationDraftState = { selected: [], target: null, activeBeforeLayout: null }
 
@@ -38,6 +40,8 @@ export function relocationDraftReducer(state: RelocationDraftState, action: Relo
       return { ...state, target: action.target }
     case 'setBeforeLayout':
       return { ...state, activeBeforeLayout: action.layoutId }
+    case 'restore':
+      return action.state
   }
 }
 

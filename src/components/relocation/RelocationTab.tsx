@@ -1,12 +1,12 @@
-import { alpha, Alert, Box, Button, ButtonBase, FormControlLabel, GlobalStyles, Link, Stack, Switch, Typography, type Theme } from '@mui/material'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { alpha, Alert, Box, Button, ButtonBase, Dialog, DialogActions, DialogContent, DialogContentText, FormControlLabel, GlobalStyles, Link, Popover, Stack, Switch, Typography, type Theme } from '@mui/material'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { facLabel } from '../../config/relocation'
 import { FLOORS, ZONE_INDEX, type LayoutId } from '../../data/mapData'
 import { useAssetsWithLocation, useLocations } from '../../hooks/useLocations'
 import { useMapViewSettings } from '../../hooks/useMapViewSettings'
 import { useRelocationDraft } from '../../hooks/useRelocationDraft'
 import { useRelocationRequests } from '../../hooks/useRelocationRequests'
-import { RelocationApiError, relocationErrorMessage } from '../../api/relocationRequests'
+import { DemoContext, RelocationApiError, relocationErrorMessage } from '../../api/relocationRequests'
 import { useCurrentUser } from '../../auth/authContext'
 import type { Lang } from '../../types/fixedAsset'
 import type { AssetLocation, LocationZone } from '../../types/location'
@@ -19,6 +19,11 @@ import { EMPTY_FORM, todayIso, validateRelocationForm, type RelocationFormValues
 import { downloadBlob, exportRelocationPng, snapshotExportInput, type RelocationExportInput } from '../../utils/exportRelocationPng'
 import { buildRequestItems, pendingCodesOf, rowsInZone, sourceZonesByFac } from '../../utils/relocationInput'
 import { SectionCard } from '../common/SectionCard'
+import { GuidedTour, useGuidedTour } from '../common/GuidedTour'
+import { RELOCATION_TOUR_STEPS, type RelocationTourCtx } from './relocationTourSteps'
+import { pickRelocationDemo } from '../../demo/relocationDemo'
+import type { RelocationDraftState } from '../../utils/relocationDraft'
+import HelpOutline from '@mui/icons-material/HelpOutlineOutlined'
 import CheckRounded from '@mui/icons-material/CheckRounded'
 import MapOutlined from '@mui/icons-material/MapOutlined'
 import { createScrollSync, DEFAULT_MAP_VIEW, type MapView } from '../map/MapScene'
@@ -94,6 +99,20 @@ const ringStyles = (t: Theme) => {
 }
 
 type Step = 1 | 2 | 3
+
+/** "Để sau" on the first-visit tour banner: hidden for the browser session. */
+const TOUR_LATER_KEY = 'f2.tour.relocation.later'
+
+/** What the tour puts back when it ends. */
+interface TourSnapshot {
+  draft: RelocationDraftState
+  form: RelocationFormValues
+  facFilter: string | null
+  afterLayoutId: LayoutId | null
+  viewBefore: LayoutId | null
+  openZone: string | null
+  scrollY: number
+}
 interface StepItem {
   label: string
   /** Short summary once done ("2 máy", "A2-3"). */
@@ -286,6 +305,110 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   const [excelNotice, setExcelNotice] = useState<string | null>(null)
   /** Machines of the last 409 (already in an open request), marked red in the selected table. */
   const [conflictCodes, setConflictCodes] = useState<ReadonlySet<string>>(new Set())
+
+  /** Building quick filter of the machine picker (controlled here so the tour can set and restore it). */
+  const [facFilter, setFacFilter] = useState<string | null>(null)
+
+  // Interactive tour: opened from "Hướng dẫn", the first-visit banner or the Guide tab. With sample data it replaces
+  // the draft while it runs (snapshot first) and restores it exactly on close / finish / skip / Esc / tab change.
+  const helpButton = useRef<HTMLButtonElement>(null)
+  const demoData = useMemo(() => pickRelocationDemo({ rows, pendingCodes, isOutside, ctx, catalog, vi }), [rows, pendingCodes, isOutside, ctx, catalog, vi])
+  const tourSnapshot = useRef<TourSnapshot | null>(null)
+  const [demoActive, setDemoActive] = useState(false)
+  /** Step the user asked for while the confirm "the tour replaces your input" is open. */
+  const [confirmAt, setConfirmAt] = useState<number | null>(null)
+  const draftDirty = draft.selected.length > 0 || !!draft.target || form.plannedMoveDate !== '' || form.plannedDoneDate !== '' || form.reason.trim() !== ''
+  const launchTour = (at: number) => {
+    setConfirmAt(null)
+    if (demoData) {
+      tourSnapshot.current = { draft: draft.snapshot(), form, facFilter, afterLayoutId, viewBefore, openZone, scrollY: window.scrollY }
+      setDemoActive(true)
+    }
+    tour.start(at)
+  }
+  const beginTour = (at: number) => (demoData && draftDirty ? setConfirmAt(at) : launchTour(at))
+  const beginRef = useRef(beginTour)
+  beginRef.current = beginTour
+  const onTourRequest = useCallback((at: number) => beginRef.current(at), [])
+  const tour = useGuidedTour('relocation', RELOCATION_TOUR_STEPS.length, helpButton, onTourRequest)
+  /** Puts back exactly what the user had before the tour (draft, form, filter, maps, scroll). */
+  const restoreTour = () => {
+    const snap = tourSnapshot.current
+    tourSnapshot.current = null
+    setDemoActive(false)
+    if (!snap) return
+    draft.restore(snap.draft)
+    setForm(snap.form)
+    setFacFilter(snap.facFilter)
+    setAfterLayoutId(snap.afterLayoutId)
+    setViewBefore(snap.viewBefore)
+    setOpenZone(snap.openZone)
+    setHoverZone(null)
+    requestAnimationFrame(() => window.scrollTo({ top: snap.scrollY, behavior: 'auto' }))
+  }
+  const closeTour = (step: number, finished: boolean) => {
+    tour.tourProps.onClose(step, finished)
+    restoreTour()
+  }
+  // API writes are blocked while sample data is shown (DemoContext guard in the repository).
+  useEffect(() => {
+    DemoContext.demo = demoActive
+    return () => {
+      DemoContext.demo = false
+    }
+  }, [demoActive])
+  const resetDemo = useCallback(() => {
+    draft.reset()
+    setForm(EMPTY_FORM)
+    setFacFilter(null)
+    setAfterLayoutId(null)
+    setViewBefore(null)
+    setOpenZone(null)
+    setHoverZone(null)
+  }, [draft.reset])
+  const tourContext = useMemo<RelocationTourCtx | undefined>(
+    () =>
+      demoActive && demoData
+        ? {
+            demo: demoData,
+            setFacFilter,
+            add: draft.add,
+            setViewBefore,
+            setOpenZone,
+            setHoverZone,
+            setTarget: (t) => {
+              setAfterLayoutId(t.layoutId)
+              draft.setTarget(t)
+            },
+            setForm,
+          }
+        : undefined,
+    [demoActive, demoData, draft.add, draft.setTarget],
+  )
+  const [resumeAnchor, setResumeAnchor] = useState<HTMLElement | null>(null)
+  const [tourLater, setTourLater] = useState(() => {
+    try {
+      return sessionStorage.getItem(TOUR_LATER_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const hideTourBanner = () => {
+    setTourLater(true)
+    try {
+      sessionStorage.setItem(TOUR_LATER_KEY, '1')
+    } catch {
+      /* Session storage unavailable: hidden until reload. */
+    }
+  }
+  const resumeStep = tour.progress && tour.progress.step > 0 ? tour.progress.step : 0
+  const openTour = (e: MouseEvent<HTMLElement>) => (resumeStep ? setResumeAnchor(e.currentTarget) : beginTour(0))
+  const startTour = (at: number) => {
+    setResumeAnchor(null)
+    hideTourBanner()
+    beginTour(at)
+  }
+  const showTourBanner = !tour.progress?.done && !tourLater && !tour.open
 
   // Guided flow: the active step frames its card; the user moves on (never while picking machines).
   const [step, setStep] = useState<Step>(1)
@@ -527,7 +650,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
   }
 
   const submit = async (values: RelocationFormValues) => {
-    if (!draft.target) return
+    if (!draft.target || DemoContext.demo) return
     setSubmitting(true)
     setSubmitError(null)
     setConflictCodes(new Set())
@@ -636,7 +759,60 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
 
       <GlobalStyles styles={RING_PROPERTY} />
       <GlobalStyles styles={ringStyles} />
-      <RelocationStepper lang={lang} steps={steps} active={step} onPick={pickStep} />
+      {demoActive && (
+        <Alert severity="info" data-testid="reloc-tour-demo" sx={{ py: 0 }}>
+          {vi ? 'Đang xem hướng dẫn · dữ liệu mẫu, không được lưu' : 'Tour in progress · sample data, not saved'}
+        </Alert>
+      )}
+      <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <Box data-tour="stepper" sx={{ maxWidth: '100%', display: 'flex' }}>
+          <RelocationStepper lang={lang} steps={steps} active={step} onPick={pickStep} />
+        </Box>
+        <Button ref={helpButton} variant="text" size="small" startIcon={<HelpOutline />} onClick={openTour} data-testid="reloc-tour-open">
+          {vi ? 'Hướng dẫn' : 'Guide'}
+        </Button>
+      </Stack>
+      <Popover
+        open={!!resumeAnchor}
+        anchorEl={resumeAnchor}
+        onClose={() => setResumeAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { p: 1.5, maxWidth: 300 } } }}
+      >
+        <Typography variant="body2" sx={{ mb: 1 }}>{vi ? `Xem tiếp từ bước ${resumeStep + 1}?` : `Continue from step ${resumeStep + 1}?`}</Typography>
+        <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+          <Button size="small" color="inherit" onClick={() => startTour(0)}>{vi ? 'Từ đầu' : 'From the start'}</Button>
+          <Button size="small" variant="contained" onClick={() => startTour(resumeStep)} autoFocus>{vi ? 'Tiếp tục' : 'Continue'}</Button>
+        </Stack>
+      </Popover>
+      {showTourBanner && (
+        <Alert
+          severity="info"
+          icon={<HelpOutline fontSize="small" />}
+          data-testid="reloc-tour-banner"
+          sx={{ py: 0, alignItems: 'center', alignSelf: 'flex-start' }}
+          action={
+            <Stack direction="row" spacing={0.5}>
+              <Button size="small" color="inherit" variant="outlined" onClick={() => startTour(0)}>{vi ? 'Xem' : 'View'}</Button>
+              <Button size="small" color="inherit" onClick={hideTourBanner}>{vi ? 'Để sau' : 'Later'}</Button>
+            </Stack>
+          }
+        >
+          {vi ? 'Lần đầu dùng? Xem hướng dẫn 1 phút' : 'First time here? Take the 1-minute tour'}
+        </Alert>
+      )}
+      <GuidedTour lang={lang} steps={RELOCATION_TOUR_STEPS} {...tour.tourProps} onClose={closeTour} context={tourContext} onReset={resetDemo} />
+      <Dialog open={confirmAt !== null} onClose={() => setConfirmAt(null)} aria-labelledby="reloc-tour-confirm" maxWidth="xs">
+        <DialogContent>
+          <DialogContentText id="reloc-tour-confirm">
+            {vi ? 'Hướng dẫn sẽ tạm thay phần đang nhập, sau đó khôi phục.' : 'The tour will temporarily replace your input, then restore it.'}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button color="inherit" onClick={() => setConfirmAt(null)}>{vi ? 'Huỷ' : 'Cancel'}</Button>
+          <Button variant="contained" onClick={() => launchTour(confirmAt ?? 0)} autoFocus>{vi ? 'Tiếp tục' : 'Continue'}</Button>
+        </DialogActions>
+      </Dialog>
       <Box role="status" aria-live="polite" data-testid="reloc-next-hint" sx={VISUALLY_HIDDEN}>{announce}</Box>
 
       {/* Pick machines + destination side by side (3fr / 2fr) from lg, stacked below; equal heights only when both have content. */}
@@ -646,7 +822,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
         actions={<SelectionSummary lang={lang} selectedRows={draft.selectedRows} onClear={draft.clear} />}
         sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}
       >
-        <Box ref={pickBox} onFocus={() => setStep(1)}>
+        <Box ref={pickBox} onFocus={() => setStep(1)} data-tour-fallback="pick-card">
         <MachinePicker
           lang={lang}
           rows={rows}
@@ -662,12 +838,14 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           onRemove={draft.remove}
           onClear={draft.clear}
           onNext={goToDestination}
+          facFilter={facFilter}
+          onFacFilterChange={setFacFilter}
         />
         </Box>
       </SectionCard>
 
       <SectionCard title={vi ? '2. Vị trí đích' : '2. Destination'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
-        <Box ref={destBox} onFocus={() => setStep(2)} data-testid="reloc-dest">
+        <Box ref={destBox} onFocus={() => setStep(2)} data-testid="reloc-dest" data-tour="target-card" data-tour-fallback="target-card">
         <TargetLocationSelect
           ref={targetSelect}
           lang={lang}
@@ -685,7 +863,9 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
       </SectionCard>
       </Box>
 
-      <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} onOpen3d={() => setOpen3d(true)} />
+      <Box data-tour="map-toolbar">
+        <RelocationMapToolbar lang={lang} settings={mapSettings} onChange={updateMapSettings} onOpen3d={() => setOpen3d(true)} />
+      </Box>
       {open3d && (
         <Suspense fallback={null}>
           <Relocation3DView
@@ -720,7 +900,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           }
           sx={{ borderTop: `3px solid ${MAP.relocFrom}` }}
         >
-          <Stack spacing={1} data-testid="reloc-before-card">
+          <Stack spacing={1} data-testid="reloc-before-card" data-tour="map-before">
             {beforeTabs.length > 1 && (
               <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }} role="group" aria-label={vi ? 'Tầng của máy đã chọn' : 'Floors of the selected machines'}>
                 <Typography variant="body2" color="text.secondary">{vi ? 'Máy đã chọn nằm ở nhiều tầng:' : 'Selected machines are on several floors:'}</Typography>
@@ -780,7 +960,7 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
           description={destPlace || undefined}
           sx={afterBorder ? { border: afterBorder } : undefined}
         >
-          <Stack spacing={1} data-testid="reloc-after-card" data-move={moveKind}>
+          <Stack spacing={1} data-testid="reloc-after-card" data-move={moveKind} data-tour="map-after">
             {cross && target && (
               <Box
                 role="status"
@@ -832,8 +1012,8 @@ function RelocationWorkspace({ lang, account, rows, locations }: { lang: Lang; a
         </SectionCard>
 
         <SectionCard title={vi ? '4. Thông tin yêu cầu' : '4. Request details'} sx={rowAlign === 'stretch' ? { height: '100%' } : undefined}>
-          <Box ref={formBox} onFocus={() => setStep(3)}>
-            <RelocationForm lang={lang} account={account} requesterName={user?.name ?? null} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting} error={submitError} onSubmit={submit} plannedDateRef={plannedDate} />
+          <Box ref={formBox} onFocus={() => setStep(3)} data-tour="request-form">
+            <RelocationForm lang={lang} account={account} requesterName={user?.name ?? null} value={form} onChange={setForm} moverCount={moverCount} submitting={submitting || demoActive} error={submitError} onSubmit={submit} plannedDateRef={plannedDate} />
           </Box>
         </SectionCard>
       </Box>

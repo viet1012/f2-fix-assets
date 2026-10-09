@@ -204,7 +204,11 @@ export function TargetLocationSelect({ lang, layouts: allLayouts, layoutId, targ
           renderInput={(params) => <TextField {...params} label="Zone" placeholder={vi ? 'Chọn zone đích' : 'Pick destination zone'} />}
         />
       </Stack>
-      {route && routeColors && <RouteLine lang={lang} route={route} fromColor={routeColors.from} toColor={routeColors.to} testId="target" />}
+      {route && routeColors && (
+        <Box data-tour="route-summary">
+          <RouteLine lang={lang} route={route} fromColor={routeColors.from} toColor={routeColors.to} testId="target" />
+        </Box>
+      )}
       {unplaced.length > 0 && (
         <Typography variant="caption" color="text.secondary" data-testid="unplaced-zones">
           {vi ? 'Zone chưa gắn với sơ đồ nào (không chọn được)' : 'Zones not tied to any layout (not selectable)'}: {unplaced.join(', ')}

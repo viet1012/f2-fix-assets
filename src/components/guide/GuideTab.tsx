@@ -11,6 +11,7 @@ import { density } from '../../theme/density'
 import GuideLightbox, { type LightboxItem, type LightboxState } from './GuideLightbox'
 import GuideSection from './GuideSection'
 import RelocationGuide from './RelocationGuide'
+import { requestTour } from '../common/GuidedTour'
 
 const cats = [
   ['vehicles', 'Vehicles'], ['buildings', 'Buildings'], ['equipment_building', 'Equipment / Building'], ['copier', 'Copier'], ['laptop', 'Laptop'], ['machinery', 'Machinery'], ['tools_equipment', 'Tools / Equipment'], ['upgrade', 'Upgrade'], ['software', 'Software'],
@@ -181,7 +182,16 @@ export default function GuideTab({ lang, onNavigate }: { lang: Lang; onNavigate?
         {part('glue')}
       </>
     ),
-    relocation: <RelocationGuide lang={lang} onNavigate={onNavigate && (() => onNavigate('relocation'))} />,
+    relocation: (
+      <RelocationGuide
+        lang={lang}
+        onNavigate={onNavigate && (() => onNavigate('relocation'))}
+        onTour={onNavigate && (() => {
+          onNavigate('relocation')
+          requestTour('relocation')
+        })}
+      />
+    ),
     appendix: <ExtraBlocks blocks={GUIDE_PARTS.upload.blocks} lang={lang} />,
   }
 

@@ -138,6 +138,15 @@ function fromApi(r: ApiRequest): RelocationRequest {
 }
 
 /** Backed by /api/relocation-requests (F2_FIXED_ASSET_HISTORY). list() returns the newest `pageSize` requests, oldest first. */
+/**
+ * Demo mode (the relocation tour shows sample data): writes must never reach the API. Set by the tour while it runs;
+ * create / upload / Excel throw instead of calling the server.
+ */
+export const DemoContext: { demo: boolean } = { demo: false }
+function assertNotDemo(operation: string) {
+  if (DemoContext.demo) throw new Error(`Blocked in demo mode: ${operation} would write sample data to the server.`)
+}
+
 export class ApiRelocationRequestRepository implements RelocationRequestRepository {
   constructor(private readonly baseUrl = API_BASE_URL, private readonly pageSize = 100) {}
 
@@ -153,6 +162,7 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
   }
 
   async create(input: NewRelocationRequest): Promise<CreatedRelocationRequest> {
+    assertNotDemo('create request')
     const response = await apiFetch(`${this.baseUrl}/api/relocation-requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -182,6 +192,7 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
 
   /** POST /api/relocation-requests/{requestNo}/drawing (multipart "file", PNG). */
   async uploadDrawing(requestNo: string, png: Blob): Promise<UploadedDrawing> {
+    assertNotDemo('upload drawing')
     const body = new FormData()
     body.append('file', png, `${requestNo}.png`)
     const response = await apiFetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}/drawing`, { method: 'POST', body })
@@ -191,6 +202,7 @@ export class ApiRelocationRequestRepository implements RelocationRequestReposito
 
   /** POST /api/relocation-requests/{requestNo}/excel; a 2xx answer that still carries excelError is a failure. */
   async regenerateExcel(requestNo: string): Promise<SavedExcel> {
+    assertNotDemo('rebuild Excel')
     const response = await apiFetch(`${this.baseUrl}/api/relocation-requests/${encodeURIComponent(requestNo)}/excel`, { method: 'POST' })
     const saved = await readApi<{ fileName?: string | null; webUrl?: string | null; excelError?: string | null }>(response)
     if (saved.excelError) throw new RelocationApiError(response.status, saved.excelError)

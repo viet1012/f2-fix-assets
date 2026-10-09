@@ -202,7 +202,7 @@ function Dashboard({ lang, setLang, mode, toggleMode, account, onLogout }: Shell
         ))}
         {visited.has('guide') && (
           <TabPanel tab="guide" active={tab === 'guide'} fallback={suspenseFallback}>
-            <GuideTab lang={lang} />
+            <GuideTab lang={lang} onNavigate={changeTab} />
           </TabPanel>
         )}
       </Box>
