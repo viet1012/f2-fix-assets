@@ -1,8 +1,7 @@
 // Guide-only data. Images live in src/assets/guide (extracted byte-for-byte from the former inline base64);
-// keys (image17…image61) are the original stable IDs referenced by byCat / gallery / appIcons.
+// keys (image17…image61) are the original stable IDs referenced by byCat / gallery.
 import image22 from '../assets/guide/image22.jpg'
 import image18 from '../assets/guide/image18.jpg'
-import image54 from '../assets/guide/image54.jpg'
 import image50 from '../assets/guide/image50.jpg'
 import image25 from '../assets/guide/image25.jpg'
 import image44 from '../assets/guide/image44.jpg'
@@ -29,7 +28,6 @@ import image17 from '../assets/guide/image17.jpg'
 import image39 from '../assets/guide/image39.jpg'
 import image53 from '../assets/guide/image53.jpg'
 import image61 from '../assets/guide/image61.jpg'
-import image60 from '../assets/guide/image60.jpg'
 import image19 from '../assets/guide/image19.jpg'
 import image37 from '../assets/guide/image37.jpg'
 import image38 from '../assets/guide/image38.jpg'
@@ -37,11 +35,9 @@ import image38 from '../assets/guide/image38.jpg'
 export const GUIDE_DATA = {
   byCat: {"vehicles": {"qr": "image29", "model": "image26", "full": "image27"}, "buildings": {"qr": "image17", "full": "image18"}, "equipment_building": {"qr": "image19", "full": "image20"}, "copier": {"model": "image21", "full": "image22", "qr": "image33"}, "laptop": {"full": "image23", "qr": "image31"}, "machinery": {"model": "image24", "full": "image25", "qr": "image28"}, "tools_equipment": {"qr": "image35", "model": "image36", "full": "image37"}, "upgrade": {"model": "image44", "full": "image48", "qr": "image49"}, "software": {"full": "image50", "qr": "image61"}},
   gallery: ["image56", "image39", "image40", "image38", "image51", "image52", "image53", "image55"],
-  appIcons: {"timemark": "image60", "timestamp": "image54"},
   images: {
     image22,
     image18,
-    image54,
     image50,
     image25,
     image44,
@@ -68,9 +64,11 @@ export const GUIDE_DATA = {
     image39,
     image53,
     image61,
-    image60,
     image19,
     image37,
     image38,
   },
 } as const
+
+// S-Patrol (Apps section). No public link yet: leave empty to hide the "Open" button.
+export const S_PATROL_URL = ''
