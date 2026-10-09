@@ -15,6 +15,8 @@ import {
   TableHead,
   TableRow,
   Tabs,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
   useTheme,
@@ -70,14 +72,32 @@ const DIM_HEIGHT = 0.6
 const FLY_MS = 600
 const MAX_BOW = 6
 const BOX = { w: 1.2, h: 1, gap: 0.5, max: 60 }
-/** Zone labels are shown when the block is at least this wide on screen (px). */
-const LABEL_MIN_PX = 56
+/** Sub-zone labels (mode "key") only when the camera is closer than this (m). */
+const SUB_LABEL_DIST = 55
+/** Label visibility / overlap pass at most every LABEL_CULL_MS. */
+const LABEL_CULL_MS = 100
+const LABEL_PAD = 2
 const PANEL_W = 300
 const DISABLED = '#94a3b8'
+const ZONE_H = { min: 0.6, max: 6 }
 
-/** Height (m) of a zone block: 0.3 + 2.5·sqrt(count / max). */
+type LabelMode = 'off' | 'key' | 'all'
+/** Overlap priority: to > from/old > major area > sub-zone. */
+type LabelTier = 'to' | 'from' | 'major' | 'sub'
+const TIER_RANK: Record<LabelTier, number> = { to: 3, from: 2, major: 1, sub: 0 }
+interface LabelEntry {
+  obj: CSS2DObject
+  tier: LabelTier
+  /** World point that must be in view (zone centre, or the label itself). */
+  anchor: THREE.Vector3
+  /** Measured chip size (px), 0 until it has been on screen. */
+  w: number
+  h: number
+}
+
+/** Height (m) of a zone block: 0.6 + 5.4·sqrt(count / max), i.e. 0.6–6 m. */
 export function zoneHeight(count: number, max: number): number {
-  return 0.3 + 2.5 * Math.sqrt(max > 0 ? Math.max(0, count) / max : 0)
+  return ZONE_H.min + (ZONE_H.max - ZONE_H.min) * Math.sqrt(max > 0 ? Math.min(1, Math.max(0, count) / max) : 0)
 }
 
 export function hasWebGL(): boolean {
@@ -159,6 +179,18 @@ function chip(text: string, style: Partial<CSSStyleDeclaration>, font: string, c
 function applyRotation(group: THREE.Object3D, layout: Layout) {
   // Mold: the drawing is shown turned clockwise (rotationDeg); seen from above that is negative about +y.
   if ('rotationDeg' in layout) group.rotation.y = -(layout.rotationDeg * Math.PI) / 180
+}
+
+/** CSS2DRenderer keeps a label's element until that label itself is removed: detach and drop every one under `root`. */
+function disposeLabels(root: THREE.Object3D) {
+  const found: CSS2DObject[] = []
+  root.traverse((o) => {
+    if (o instanceof CSS2DObject) found.push(o)
+  })
+  for (const o of found) {
+    o.removeFromParent()
+    o.element.remove()
+  }
 }
 
 function disposeTree(root: THREE.Object3D) {
@@ -252,8 +284,11 @@ interface Engine {
   overlay: THREE.Group | null
   /** Per-frame animations of the overlay (glow ring, arc dots). */
   animators: Array<(now: number) => void>
-  /** Zone labels shown only when large enough on screen. */
-  sized: Array<{ obj: CSS2DObject; size: number; on: boolean }>
+  /** Labels of the overlay (one per zone code); visibility set by the cull pass. */
+  labels: LabelEntry[]
+  labelMode: LabelMode
+  /** Re-run the label pass on the next frame (new labels / mode). */
+  invalidateLabels: () => void
   /** Hover / click targets: zone blocks and machine boxes. */
   picks: THREE.Object3D[]
   blocks: Map<string, THREE.Mesh>
@@ -312,7 +347,7 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
   const [engineId, setEngineId] = useState(0)
   const [panelOpen, setPanelOpen] = useState(true)
   const [relatedOnly, setRelatedOnly] = useState(false)
-  const [showLabels, setShowLabels] = useState(true)
+  const [labelMode, setLabelMode] = useState<LabelMode>('key')
   const [hoverZone, setHoverZone] = useState<string | null>(null)
   const engineRef = useRef<Engine | null>(null)
   const tipRef = useRef<HTMLDivElement>(null)
@@ -344,9 +379,13 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
     renderer.domElement.style.display = 'block'
+    // StrictMode / remount: never stack a second canvas or label layer on leftovers.
+    host.querySelectorAll(':scope > [data-reloc3d-layer]').forEach((el) => el.remove())
+    renderer.domElement.dataset.reloc3dLayer = 'canvas'
     host.appendChild(renderer.domElement)
     const labels = new CSS2DRenderer()
-    Object.assign(labels.domElement.style, { position: 'absolute', inset: '0', pointerEvents: 'none' })
+    labels.domElement.dataset.reloc3dLayer = 'labels'
+    Object.assign(labels.domElement.style, { position: 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden' })
     host.appendChild(labels.domElement)
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.minPolarAngle = ((90 - TILT_MAX) * Math.PI) / 180
@@ -355,6 +394,46 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
     controls.maxDistance = SCENE_W * 3
 
     const world = new THREE.Vector3()
+    const view = new THREE.Vector3()
+    let lastCull = -Infinity
+    let labelsDirty = true
+    /** Mode / distance gate, in-view test, then greedy overlap removal by tier (screen bboxes). */
+    const cullLabels = () => {
+      camera.updateMatrixWorld()
+      const W = renderer.domElement.clientWidth
+      const H = renderer.domElement.clientHeight
+      const mode = engine.labelMode
+      const cand: Array<{ e: LabelEntry; x: number; y: number; dist: number }> = []
+      for (const e of engine.labels) {
+        e.obj.visible = false
+        if (mode === 'off') continue
+        const dist = camera.position.distanceTo(e.anchor)
+        if (e.tier === 'sub' && mode === 'key' && dist >= SUB_LABEL_DIST) continue
+        view.copy(e.anchor).applyMatrix4(camera.matrixWorldInverse)
+        if (view.z >= 0) continue // behind the camera
+        view.applyMatrix4(camera.projectionMatrix)
+        if (Math.abs(view.x) > 1 || Math.abs(view.y) > 1 || view.z > 1) continue
+        e.obj.getWorldPosition(world).project(camera)
+        cand.push({ e, x: ((world.x + 1) / 2) * W, y: ((1 - world.y) / 2) * H, dist })
+      }
+      cand.sort((a, b) => TIER_RANK[b.e.tier] - TIER_RANK[a.e.tier] || a.dist - b.dist)
+      const taken: Array<[number, number, number, number]> = []
+      for (const { e, x, y } of cand) {
+        if (!e.w && e.obj.element.offsetWidth) {
+          e.w = e.obj.element.offsetWidth
+          e.h = e.obj.element.offsetHeight
+        }
+        const w = e.w || (e.obj.element.textContent?.length ?? 0) * 7 + 16
+        const h = e.h || 18
+        const x0 = x - e.obj.center.x * w - LABEL_PAD
+        const y0 = y - e.obj.center.y * h - LABEL_PAD
+        const x1 = x0 + w + 2 * LABEL_PAD
+        const y1 = y0 + h + 2 * LABEL_PAD
+        if (taken.some(([a0, b0, a1, b1]) => x0 < a1 && x1 > a0 && y0 < b1 && y1 > b0)) continue
+        taken.push([x0, y0, x1, y1])
+        e.obj.visible = true
+      }
+    }
     const tick = (now: number) => {
       frame = 0
       if (disposed) return
@@ -367,15 +446,15 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
         if (k >= 1) flight = null
       }
       if (!reduced) engine.animators.forEach((a) => a(now))
-      // Zone labels: only when the block is wide enough on screen.
-      const focalPx = renderer.domElement.clientHeight / (2 * Math.tan((camera.fov * Math.PI) / 360))
-      for (const s of engine.sized) {
-        s.obj.getWorldPosition(world)
-        s.obj.visible = s.on && (s.size * focalPx) / Math.max(1, camera.position.distanceTo(world)) >= LABEL_MIN_PX
+      // Throttled label pass; while one is pending the loop keeps running so the last camera pose is culled too.
+      labelsDirty = now - lastCull < LABEL_CULL_MS
+      if (!labelsDirty) {
+        cullLabels()
+        lastCull = now
       }
       renderer.render(scene, camera)
       labels.render(scene, camera)
-      if (flight || (!reduced && engine.animators.length)) requestRender()
+      if (labelsDirty || flight || (!reduced && engine.animators.length)) requestRender()
     }
     const requestRender = () => {
       if (!disposed && !frame) frame = requestAnimationFrame(tick)
@@ -460,9 +539,13 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
     renderer.domElement.addEventListener('pointerdown', onDown)
     renderer.domElement.addEventListener('pointerup', onUp)
 
+    const invalidateLabels = () => {
+      lastCull = -Infinity
+      requestRender()
+    }
     const engine: Engine & { layoutId: LayoutId } = {
-      scene, camera, controls, renderer, sun, base: null, overlay: null, animators: [], sized: [], picks: [], blocks: new Map(), focus: [],
-      requestRender, fly, layoutId: initialLayoutId,
+      scene, camera, controls, renderer, sun, base: null, overlay: null, animators: [], labels: [], labelMode: 'key', invalidateLabels,
+      picks: [], blocks: new Map(), focus: [], requestRender, fly, layoutId: initialLayoutId,
     }
     engineRef.current = engine
     resize()
@@ -480,6 +563,7 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       controls.removeEventListener('change', requestRender)
       controls.removeEventListener('start', cancelFlight)
       controls.dispose()
+      disposeLabels(scene)
       disposeTree(scene)
       scene.clear()
       renderer.dispose()
@@ -534,10 +618,28 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
     if (!engine) return
     const { isPickable, placeOf } = live.current
     const f = frameOf(layout)
+    // Never stack overlays: drop any previous layoutGroup (and its label elements) first.
+    for (const old of engine.scene.children.filter((o) => o.name === 'layoutGroup')) {
+      disposeLabels(old)
+      engine.scene.remove(old)
+      disposeTree(old)
+    }
     const group = new THREE.Group()
+    group.name = 'layoutGroup'
     applyRotation(group, layout)
     const animators: Engine['animators'] = []
-    const sized: Engine['sized'] = []
+    /** One label per key (zone code); a higher tier replaces a lower one. Anchors are local until the group is placed. */
+    const labelMap = new Map<string, LabelEntry>()
+    const addLabel = (key: string, tier: LabelTier, obj: CSS2DObject, anchor: THREE.Vector3 = obj.position.clone()) => {
+      const prev = labelMap.get(key)
+      if (prev && TIER_RANK[prev.tier] >= TIER_RANK[tier]) return
+      if (prev) {
+        prev.obj.removeFromParent()
+        prev.obj.element.remove()
+      }
+      group.add(obj)
+      labelMap.set(key, { obj, tier, anchor, w: 0, h: 0 })
+    }
     const picks: THREE.Object3D[] = []
     const blocks = new Map<string, THREE.Mesh>()
     const focusLocal: THREE.Vector3[] = []
@@ -580,10 +682,11 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       if (relatedOnly && !rel) continue
       const pickable = isPickable(layout.id, a.code)
       const dim = focusMode && !isTo && !isOld
-      const h = zoneHeight(count, max) * (dim ? DIM_HEIGHT : 1)
+      const h = Math.max(ZONE_H.min, zoneHeight(count, max) * (dim ? DIM_HEIGHT : 1))
       heights.set(a.code, h)
       const color = isTo ? MAP.relocTo : isOld ? AMBER.base : pickable ? colorOf(a.code) : DISABLED
       const opacity = isTo ? OPACITY.to : isOld ? OPACITY.old : dim ? OPACITY.dim : OPACITY.zone
+      // The prism spans y = 0..h (centre h/2): it stands on the floor, just above the drawing.
       const block = new THREE.Mesh(prism(f, a.points, h), new THREE.MeshStandardMaterial({ color, transparent: true, opacity, depthWrite: false }))
       block.position.y = 0.02
       block.castShadow = !dim
@@ -594,12 +697,12 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       group.add(block)
       picks.push(block)
       blocks.set(a.code, block)
-      if (showLabels && !isTo && !isOld) {
+      // Sub-zone chip (a major area without sub-zones gets the major chip below instead).
+      if (!isTo && !isOld && !majors.includes(a.code)) {
         const b = bboxOf(a.points)
         const label = chip(`${a.code} · ${count}`, { background: 'rgba(255,255,255,.92)', color: colorOf(a.code), border: `1px solid ${colorOf(a.code)}`, fontSize: '11px', fontWeight: '600', padding: '1px 6px' }, font)
         label.position.set(f.X((b.x0 + b.x1) / 2), h + 0.3, f.Z((b.y0 + b.y1) / 2))
-        group.add(label)
-        sized.push({ obj: label, size: Math.min(((b.x1 - b.x0) / 100) * f.w, ((b.y1 - b.y0) / 100) * f.d), on: true })
+        addLabel(a.code, 'sub', label)
       }
     }
 
@@ -612,15 +715,13 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       const s = shapeOf(code)
       if (s) group.add(ribbon(f, s.points, 0.6, colorOf(code), 0.9))
     }
-    // Major-area labels on the floor, bottom-right corner, in the area colour.
-    if (showLabels) {
-      for (const a of layout.areas) {
-        if (relatedOnly && !isRelated(a.code) && !parents.has(a.code)) continue
-        const b = bboxOf(a.points)
-        const label = chip(a.code, { background: colorOf(a.code), color: '#ffffff', fontSize: '11px', padding: '1px 6px' }, font, [1, 1])
-        label.position.set(f.X(b.x1) - 0.5, 0.1, f.Z(b.y1) - 0.5)
-        group.add(label)
-      }
+    // Major-area labels on the floor, bottom-right corner, in the area colour; shown while the area centre is in view.
+    for (const a of layout.areas) {
+      if (relatedOnly && !isRelated(a.code) && !parents.has(a.code)) continue
+      const b = bboxOf(a.points)
+      const label = chip(a.code, { background: colorOf(a.code), color: '#ffffff', fontSize: '11px', padding: '1px 6px' }, font, [1, 1])
+      label.position.set(f.X(b.x1) - 0.5, 0.1, f.Z(b.y1) - 0.5)
+      addLabel(a.code, 'major', label, new THREE.Vector3(f.X((b.x0 + b.x1) / 2), 0.1, f.Z((b.y0 + b.y1) / 2)))
     }
 
     // Destination: soft pulsing ring on the floor.
@@ -643,7 +744,7 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
 
     // Pins with captions (as the 2D chips) and the machine boxes (a count symbol, not real positions).
     const topOf = (code: string) => heights.get(code) ?? 0.3
-    const pin = (at: THREE.Vector3, color: string, text: string, style: Partial<CSSStyleDeclaration>) => {
+    const pin = (code: string, tier: LabelTier, at: THREE.Vector3, color: string, text: string, style: Partial<CSSStyleDeclaration>) => {
       const top = at.y + 2.4
       const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.4, 8), new THREE.MeshStandardMaterial({ color }))
       stem.position.set(at.x, at.y + 1.2, at.z)
@@ -652,7 +753,8 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       head.castShadow = true
       const label = chip(text, style, font, [0.5, 1.25])
       label.position.set(at.x, top + 0.5, at.z)
-      group.add(stem, head, label)
+      group.add(stem, head)
+      addLabel(code, tier, label, new THREE.Vector3(at.x, at.y, at.z))
     }
     const boxGrid = (list: readonly AssetLocation[], at: THREE.Vector3, color: string, opacity: number) => {
       const n = Math.min(list.length, BOX.max)
@@ -682,13 +784,13 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       const c = centerOf(code)
       if (!c) continue
       const label = `${rs.length > 1 ? `${rs[0].code} +${rs.length - 1}` : rs[0].code} (${vi ? 'cũ' : 'old'})`
-      pin(new THREE.Vector3(c.x, topOf(code), c.z), AMBER.base, label, oldStyle)
+      pin(code, 'from', new THREE.Vector3(c.x, topOf(code), c.z), AMBER.base, label, oldStyle)
       boxGrid(target ? rs.filter((r) => movingRows.includes(r)) : rs, c, AMBER.base, 1)
       if (toEnd) arcTo(new THREE.Vector3(c.x, topOf(code) + 0.4, c.z), toEnd, MAP.relocTo)
       focusLocal.push(c)
     }
     if (toZone && toCenter && toRows.length) {
-      pin(new THREE.Vector3(toCenter.x, topOf(toZone), toCenter.z), MAP.relocTo, `${toZone} · ${toRows.length === 1 ? toRows[0].code : countText(toRows.length)}`, { background: MAP.relocTo, color: '#ffffff' })
+      pin(toZone, 'to', new THREE.Vector3(toCenter.x, topOf(toZone), toCenter.z), MAP.relocTo, `${toZone} · ${toRows.length === 1 ? toRows[0].code : countText(toRows.length)}`, { background: MAP.relocTo, color: '#ffffff' })
       boxGrid(toRows, toCenter, MAP.relocTo, OPACITY.ghost)
     }
 
@@ -699,13 +801,13 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
         if (id === null || id === layout.id) return []
         const rs = [...byZone.values()].flat()
         const from = layouts.find((l) => l.id === id)
-        return from ? [{ text: `◂ ${vi ? 'Từ' : 'From'} ${placeOf(id, rowFac(rs[0], ctx))} / ${[...byZone.keys()].join(', ')} (${rs.length})` }] : []
+        return from ? [{ id, text: `◂ ${vi ? 'Từ' : 'From'} ${placeOf(id, rowFac(rs[0], ctx))} / ${[...byZone.keys()].join(', ')} (${rs.length})` }] : []
       })
       sources.forEach((s, i) => {
         const start = new THREE.Vector3(-f.w / 2 - 2, 0.4, Math.max(-f.d / 2, Math.min(f.d / 2, toEnd.z + (i - (sources.length - 1) / 2) * 7)))
         const label = chip(s.text, pillStyle, font, [1, 0.5])
         label.position.copy(start)
-        group.add(label)
+        addLabel(`from:${s.id}`, 'from', label)
         arcTo(start, toEnd, MAP.relocCross)
         focusLocal.push(start)
       })
@@ -718,7 +820,7 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
         const end = new THREE.Vector3(f.w / 2 + 2, 0.4, z)
         const label = chip(`${vi ? 'Sang' : 'To'} ${placeOf(target.layoutId, targetFac(target, ctx))} / ${target.zone} ▸`, pillStyle, font, [0, 0.5])
         label.position.copy(end)
-        group.add(label)
+        addLabel(`to:${target.layoutId}:${target.zone}`, 'to', label)
         for (const [code, c] of olds) arcTo(new THREE.Vector3(c.x, topOf(code) + 0.4, c.z), end, MAP.relocCross)
         focusLocal.push(end)
       }
@@ -726,16 +828,30 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
 
     engine.scene.add(group)
     group.updateMatrixWorld(true)
-    Object.assign(engine, { overlay: group, animators, sized, picks, blocks, focus: focusLocal.map((p) => group.localToWorld(p.clone())) })
-    engine.requestRender()
+    const labels = [...labelMap.values()]
+    for (const l of labels) {
+      group.localToWorld(l.anchor)
+      l.obj.visible = false // until the first label pass
+    }
+    Object.assign(engine, { overlay: group, animators, labels, picks, blocks, focus: focusLocal.map((p) => group.localToWorld(p.clone())) })
+    engine.invalidateLabels()
     return () => {
+      disposeLabels(group)
       engine.scene.remove(group)
       disposeTree(group)
-      Object.assign(engine, { overlay: null, animators: [], sized: [], picks: [], blocks: new Map(), focus: [] })
+      Object.assign(engine, { overlay: null, animators: [], labels: [], picks: [], blocks: new Map(), focus: [] })
     }
     // countText / vi / font follow lang and theme; isPickable / placeOf are read from `live`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engineId, layout, rows, target, ctx, zoneCount, relatedOnly, showLabels, lang, font])
+  }, [engineId, layout, rows, target, ctx, zoneCount, relatedOnly, lang, font])
+
+  // Label mode: only the label pass changes, the scene stays.
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine) return
+    engine.labelMode = labelMode
+    engine.invalidateLabels()
+  }, [engineId, labelMode])
 
   /** Camera framing the move (or the whole layout), `elevation` degrees above the ground. */
   const frameView = (elevation = TILT_VIEW) => {
@@ -789,7 +905,7 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
       })
       engine.requestRender()
     }
-  }, [engineId, hoverZone, layout, rows, target, relatedOnly, showLabels])
+  }, [engineId, hoverZone, layout, rows, target, relatedOnly])
 
   const camButtons = [
     { key: 'top', icon: <GridViewRounded fontSize="small" />, label: vi ? 'Nhìn từ trên' : 'Top view', run: () => tiltTo(TILT_MAX) },
@@ -905,10 +1021,21 @@ export default function Relocation3DView(props: Relocation3DViewProps) {
                 control={<Checkbox size="small" checked={relatedOnly} onChange={(e) => setRelatedOnly(e.target.checked)} />}
                 label={<Typography variant="body2">{vi ? 'Chỉ zone liên quan' : 'Related zones only'}</Typography>}
               />
-              <FormControlLabel
-                control={<Checkbox size="small" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />}
-                label={<Typography variant="body2">{vi ? 'Hiện nhãn' : 'Show labels'}</Typography>}
-              />
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
+                <Typography variant="body2" id="reloc-3d-labels">{vi ? 'Hiện nhãn' : 'Show labels'}</Typography>
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={labelMode}
+                  onChange={(_, v: LabelMode | null) => v && setLabelMode(v)}
+                  aria-labelledby="reloc-3d-labels"
+                  sx={{ '& .MuiToggleButton-root': { py: 0.25, px: 1, fontSize: 12, textTransform: 'none' } }}
+                >
+                  <ToggleButton value="off">{vi ? 'Tắt' : 'Off'}</ToggleButton>
+                  <ToggleButton value="key">{vi ? 'Chính' : 'Key'}</ToggleButton>
+                  <ToggleButton value="all">{vi ? 'Tất cả' : 'All'}</ToggleButton>
+                </ToggleButtonGroup>
+              </Stack>
             </Stack>
             <Stack spacing={0.75} aria-label={vi ? 'Chú giải' : 'Legend'}>
               <Swatch color={FOCUS.from.color} fill={1} label={vi ? 'Vị trí hiện tại' : 'Current location'} />
